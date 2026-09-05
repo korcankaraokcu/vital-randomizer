@@ -46,12 +46,15 @@ namespace audition
 
     PitchRule pitchRuleFor (const std::string& style)
     {
-        if (style == "Bass" || style == "Keys" || style == "Lead" || style == "Sequence")
-            return { true, 0.45f, 0.45f };
+        if (style == "Bass" || style == "Keys" || style == "Lead")
+            return { true, 0.45f, 0.45f, true };
+        // A sequence may sit on any step, it just has to be on one.
+        if (style == "Sequence")
+            return { true, 0.40f, 0.35f, false };
         // A pad may be hazier about its pitch than a lead, but it still has to
         // be playing the note somebody pressed.
         if (style == "Pad")
-            return { true, 0.35f, 0.60f };
+            return { true, 0.35f, 0.60f, true };
         return { false, 0.0f, 0.0f };
     }
 
@@ -59,9 +62,12 @@ namespace audition
     {
         // A bass is a struck note. Holding the key should not keep it going,
         // and the same goes for a drum.
-        // A decay of 1.30 still measures about 0.11 here, so this leaves the
-        // longest body the style allows some room and nothing beyond it.
-        if (style == "Bass")       return 0.15f;
+        /*  A fifth of the early level, late in a held note, is a note that has
+            clearly stopped. Fifteen percent was tight enough to fight the decay
+            band the style is meant to have: a bass is asked for roughly a second
+            of body, and a second of body still has something left at 1.2s.
+        */
+        if (style == "Bass")       return 0.20f;
         if (style == "Percussion") return 0.10f;
         if (style == "Keys")       return 0.60f;   // short, but a key can be held
         // One means no limit at all, and it has to mean that rather than a
@@ -71,15 +77,21 @@ namespace audition
         return kNoHeldLimit;
     }
 
-    Brightness brightnessFor (const std::string& style)
+    Brightness brightnessFor (const std::string& style, float complexity)
     {
-        if (style == "Bass")       return { 0.0f,   2200.0f };
-        if (style == "Keys")       return { 250.0f, 3400.0f };
+        const auto widen = [complexity] (Brightness b)
+        {
+            b.high *= 1.0f + 0.45f * juce::jlimit (0.0f, 1.0f, complexity - 0.35f);
+            return b;
+        };
+        if (style == "Bass")       return widen ({ 0.0f,   2200.0f });
+        if (style == "Keys")       return widen ({ 250.0f, 3400.0f });
         // Pads run brighter than the rest and the library agrees, with a p90
         // just past five kilohertz.
-        if (style == "Pad")        return { 150.0f, 4300.0f };
-        if (style == "Lead")       return { 400.0f, 5800.0f };
-        if (style == "Percussion") return { 0.0f,   9000.0f };
+        if (style == "Pad")        return widen ({ 150.0f, 4300.0f });
+        if (style == "Lead")       return widen ({ 400.0f, 5800.0f });
+        // A hat or a click belongs up there, so this one is generous.
+        if (style == "Percussion") return widen ({ 0.0f, 12000.0f });
         // Sequence, SFX and Experiment are allowed to go wherever they like.
         return { 0.0f, 20000.0f };
     }
@@ -390,6 +402,7 @@ namespace audition
                         const auto semis = 12.0 * std::log2 (m.pitchHz / expected);
                         const auto octaves = std::round (semis / 12.0);
                         m.pitchErrorSemitones = (float) std::abs (semis - octaves * 12.0);
+                        m.pitchOffGridSemitones = (float) std::abs (semis - std::round (semis));
                     }
                 }
             }

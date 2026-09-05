@@ -1,14 +1,14 @@
 /*
-    Console harness: the C++ equivalent of tools/validate.py.
+    Console harness.
 
-    Loads Vital, learns the user's library, rolls patches, pushes each one into
-    Vital and renders a note offline, then scores what came back. A patch that
-    looks plausible as JSON can still be silent, clipped or a burst of noise,
-    and none of that is visible without hearing it.
+    Loads Vital, rolls patches, pushes each one into Vital and renders a note
+    offline, then scores what came back. A patch that looks plausible as JSON
+    can still be silent, clipped or a burst of noise, and none of that is
+    visible without hearing it.
 
-    This exists so the C++ generator can be checked against the same bar the
-    Python reference implementation was measured on, rather than assumed to have
-    survived the port.
+    It is what every claim about the generator in docs/notes.md was measured
+    with, so a change that sounds fine can still be shown not to have moved the
+    numbers backwards.
 */
 #include <cmath>
 #include <iostream>
@@ -20,10 +20,10 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "../src/Audition.h"
+#include "../src/Archetypes.h"
 #include "../src/Axes.h"
 #include "../src/Generator.h"
 #include "../src/Loudness.h"
-#include "../src/StyleModel.h"
 #include "../src/VitalHost.h"
 #include "../src/VitalState.h"
 
@@ -136,12 +136,17 @@ int main (int argc, char** argv)
         to make.
     */
     int perStyle = 6;
-    juce::StringArray styles { "Bass", "Lead", "Keys", "Pad",
-                               "Sequence", "Percussion", "SFX", "Experiment" };
-    float bright = 0.55f, dirt = 0.55f, space = 0.55f, move = 0.65f;
+    juce::StringArray styles;
+    for (const auto& name : archetype::styleNames())
+        styles.add (juce::String (name));
+    // Negative means "use the style's own default", which is what the plugin
+    // does. Testing every style at one neutral setting measures a patch
+    // nobody would ever hear.
+    float bright = -1.0f, dirt = -1.0f, space = -1.0f, move = -1.0f;
+    float complexity = -1.0f;
+    bool rampComplexity = false;
     juce::File saveTo = juce::File::getCurrentWorkingDirectory().getChildFile ("out");
     juce::File diagFile;
-    int corpusCount = 0;
     for (int i = 1; i < argc; ++i)
     {
         const juce::String arg (argv[i]);
@@ -152,9 +157,18 @@ int main (int argc, char** argv)
         if (arg.startsWith ("--dirt="))      dirt = value.getFloatValue();
         if (arg.startsWith ("--space="))     space = value.getFloatValue();
         if (arg.startsWith ("--move="))      move = value.getFloatValue();
+        if (arg.startsWith ("--complexity="))
+        {
+            // --complexity=ramp walks the whole range across a style's presets,
+            // the first at nothing and the last at everything, so they can be
+            // compared side by side rather than heard one at a time.
+            if (value.trim() == "ramp")
+                rampComplexity = true;
+            else
+                complexity = value.getFloatValue();
+        }
         if (arg.startsWith ("--save="))      saveTo = juce::File (value);
         if (arg.startsWith ("--diag="))      diagFile = juce::File (value);
-        if (arg.startsWith ("--corpus="))    corpusCount = value.getIntValue();
     }
 
     /*  Diagnostic: load one patch and measure it repeatedly.
@@ -214,85 +228,6 @@ int main (int argc, char** argv)
         return 0;
     }
 
-    /*  Measure hand-made presets from the user's library with the same code the
-        plugin uses, so the level target is derived from the same metric it will
-        be compared against. A target carried over from a different measurement
-        is just a number that happens to look right.
-    */
-    if (corpusCount > 0)
-    {
-        VitalHost h;
-        juce::String err;
-        if (! h.load (VitalHost::findInstalled(), kSampleRate, kBlockSize, err))
-        {
-            std::cout << "could not load Vital: " << err << std::endl;
-            return 1;
-        }
-
-        juce::Array<juce::File> files;
-        model::StyleModel::defaultLibraryRoot()
-            .findChildFiles (files, juce::File::findFiles, true, "*.vital");
-        if (files.isEmpty())
-        {
-            std::cout << "no presets found" << std::endl;
-            return 1;
-        }
-
-        juce::String onlyStyle;
-        for (int i = 1; i < argc; ++i)
-        {
-            const juce::String arg (argv[i]);
-            if (arg.startsWith ("--styles="))
-                onlyStyle = arg.fromFirstOccurrenceOf ("=", false, false);
-        }
-
-        juce::Random rng (7);
-        std::vector<float> levels, peaks, crests, centroids;
-        for (int i = 0; i < files.size() && (int) levels.size() < corpusCount; ++i)
-        {
-            const auto& f = files[i];
-            auto doc = nlohmann::json::parse (f.loadFileAsString().toStdString(), nullptr, false);
-            if (doc.is_discarded() || ! doc.contains ("settings"))
-                continue;
-            if (onlyStyle.isNotEmpty())
-            {
-                const auto s = doc.value ("preset_style", std::string {});
-                if (! onlyStyle.equalsIgnoreCase (juce::String (s)))
-                    continue;
-            }
-            if (! h.applyPreset (doc))
-                continue;
-
-            const auto m = audition::audition (*h.processor(), kSampleRate, kBlockSize);
-            if (m.silent)
-                continue;
-            levels.push_back (m.rms);
-            peaks.push_back (m.peak);
-            crests.push_back (m.crestDb);
-            centroids.push_back (m.centroidHz);
-        }
-
-        const auto report = [] (const char* label, std::vector<float> v)
-        {
-            if (v.size() < 5)
-                return;
-            std::sort (v.begin(), v.end());
-            std::cout << "  " << juce::String (label).paddedRight (' ', 10)
-                      << "p10 " << juce::String (v[v.size() / 10], 4)
-                      << "   median " << juce::String (v[v.size() / 2], 4)
-                      << "   p90 " << juce::String (v[v.size() * 9 / 10], 4)
-                      << std::endl;
-        };
-
-        std::cout << "hand-made presets, measured the way the plugin measures (n="
-                  << levels.size() << ")" << std::endl;
-        report ("level", levels);
-        report ("peak", peaks);
-        report ("crest dB", crests);
-        report ("centroid", centroids);
-        return 0;
-    }
-
     const auto vitalPath = VitalHost::findInstalled();
     if (vitalPath == juce::File())
     {
@@ -312,27 +247,16 @@ int main (int argc, char** argv)
     std::cout << "loaded and warmed in "
               << juce::String (juce::Time::getMillisecondCounterHiRes() - t0, 0) << " ms\n";
 
-    model::StyleModel styleModel;
-    const auto cache = model::StyleModel::defaultCacheFile();
-    if (! styleModel.loadFromFile (cache))
+    gen::Generator generator;
     {
-        const auto root = model::StyleModel::defaultLibraryRoot();
-        std::cout << "learning from " << root.getFullPathName() << "\n";
-        if (styleModel.buildFromLibrary (root) == 0)
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
         {
-            std::cout << "no presets found\n";
+            std::cout << "could not read Vital's init patch" << std::endl;
             return 1;
         }
-        styleModel.saveToFile (cache);
-    }
-    std::cout << "style model: " << styleModel.presetCount() << " presets\n\n";
-
-    gen::Generator generator (styleModel);
-    {
-        const auto init = host.currentPreset();
-        if (! init.is_null() && init.contains ("settings")
-            && init["settings"].contains ("sample"))
-            generator.setDefaultSample (init["settings"]["sample"]);
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
     }
 
     std::cout << juce::String ("style").paddedRight (' ', 10)
@@ -355,7 +279,7 @@ int main (int argc, char** argv)
     std::map<juce::String, std::vector<float>> stylePitch, styleSalience;
     for (const auto& style : styles)
     {
-        if (styleModel.style (style.toStdString()) == nullptr)
+        if (archetype::find (style.toStdString()) == nullptr)
         {
             std::cout << "skipping unknown style " << style << "\n";
             continue;
@@ -375,8 +299,22 @@ int main (int argc, char** argv)
             gen::Request request;
             request.style = style.toStdString();
             request.amount = 1.0f;
-            request.sliders = { { "bright", bright }, { "dirt", dirt },
-                                { "space", space }, { "move", move } };
+            const auto preset = archetype::defaultSlidersFor (style.toStdString());
+            request.sliders = {
+                { "bright", bright >= 0.0f ? bright : preset.bright },
+                { "dirt",   dirt   >= 0.0f ? dirt   : preset.dirt },
+                { "space",  space  >= 0.0f ? space  : preset.space },
+                { "move",   move   >= 0.0f ? move   : preset.move },
+                { "complexity", complexity >= 0.0f ? complexity : preset.complexity } };
+
+            if (rampComplexity)
+            {
+                // Stepped on what has been kept, not on what has been tried, so
+                // a rejected candidate does not put the ramp out of step.
+                request.sliders["complexity"] = perStyle > 1
+                    ? (float) saved / (float) (perStyle - 1) : 0.5f;
+                request.complexityWobble = 0.0f;
+            }
             request.name = (style + " " + juce::String (saved + 1)).toStdString();
 
             auto result = generator.roll (request);
@@ -409,6 +347,7 @@ int main (int argc, char** argv)
         again is the only way to be sure the patch a user hears is the level it
         was supposed to be.
     */
+                bool exhausted = true;
                 for (int pass = 0; pass < 3; ++pass)
                 {
                     const auto loaded = pass == 0
@@ -426,6 +365,7 @@ int main (int argc, char** argv)
                     auto m = audition::audition (*host.processor(), kSampleRate, kBlockSize);
                     if (! m.usable())
                     {
+                        exhausted = false;
                         rejects[style][m.silent ? "silent"
                                       : m.clickOnly ? "click only"
                                       : m.tooPeaky ? "too peaky"
@@ -433,24 +373,30 @@ int main (int argc, char** argv)
                         break;
                     }
 
-                    const auto bounds = audition::brightnessFor (style.toStdString());
+                    const auto bounds = audition::brightnessFor (style.toStdString(),
+                                                 request.sliders["complexity"]);
                     if (m.centroidHz > 0.0f
                         && (m.centroidHz < bounds.low || m.centroidHz > bounds.high))
                     {
+                        exhausted = false;
                         rejects[style][m.centroidHz > bounds.high ? "too bright" : "too dark"]++;
                         break;
                     }
                     if (m.heldRatio > audition::maxHeldRatioFor (style.toStdString()))
                     {
+                        exhausted = false;
                         rejects[style]["note keeps going"]++;
                         break;
                     }
 
                     const auto pitch = audition::pitchRuleFor (style.toStdString());
+                    const auto pitchError = pitch.octavesOnly ? m.pitchErrorSemitones
+                                                              : m.pitchOffGridSemitones;
                     if (pitch.required
                         && (m.pitchSalience < pitch.minSalience
-                            || m.pitchErrorSemitones > pitch.maxErrorSemitones))
+                            || pitchError > pitch.maxErrorSemitones))
                     {
+                        exhausted = false;
                         rejects[style][m.pitchSalience < pitch.minSalience
                                            ? "pitch unclear" : "wrong note"]++;
                         break;
@@ -473,6 +419,7 @@ int main (int argc, char** argv)
                         if (wanted == 0.0f)
                         {
                             accepted = true;
+                            exhausted = false;
                             accepted_m = m;
                             break;
                         }
@@ -482,10 +429,17 @@ int main (int argc, char** argv)
                                                           m.rms, m.peak);
                     if (std::abs (wanted - got) > 6.0f)
                     {
+                        exhausted = false;
                         rejects[style]["level out of reach"]++;
                         break;
                     }
                 }
+
+                // Running out of level passes without ever tripping a check is
+                // its own outcome, and it was invisible: a style could fail to
+                // fill its quota with nothing at all recorded against it.
+                if (! accepted && exhausted)
+                    rejects[style]["level never settled"]++;
 
                 if (! accepted)
                 {
@@ -505,8 +459,20 @@ int main (int argc, char** argv)
                 continue;
             }
 
+            /*  The screen already decided this patch is worth keeping, and it
+                is far more thorough than a second opinion taken here. A plain
+                average over a two second window, which is what scoring the
+                render measures, reads a short bass as silent because most of
+                that window is silence, and short is exactly what a bass is
+                supposed to be. So the render is kept only for the brightness
+                figure and the verdict comes from the screen.
+            */
             auto audio = renderNote (*host.processor());
             auto score = scoreAudio (audio);
+            score.ok = true;
+            score.verdict = "ok";
+            score.rms = accepted_m.rms;
+            score.peak = accepted_m.peak;
             if (rerolls > 0)
                 score.verdict << " (" << rerolls << "x)";
             /*  Report the level the plugin actually targets, not the mean over
@@ -584,7 +550,7 @@ int main (int argc, char** argv)
 
     /*  Loudness consistency is the number that matters here. Hand-made presets
         from a real library sit at a median of 0.135 on this metric. Landing near
-        that, and tighter than the corpus spread, is the difference between a
+        that, and tighter than their spread, is the difference between a
         batch you can audition and the "some are far too loud, some barely
         audible" problem the screen exists to solve.
     */

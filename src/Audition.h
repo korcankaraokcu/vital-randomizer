@@ -57,6 +57,7 @@ namespace audition
         float pitchHz = 0.0f;
         float pitchSalience = 0.0f;     // 1 is a clear steady note, 0 is noise
         float pitchErrorSemitones = 0.0f;   // distance from the nearest octave
+        float pitchOffGridSemitones = 0.0f; // distance from the nearest semitone
         bool silent = false;
         bool clickOnly = false;
         bool clipping = false;
@@ -71,16 +72,24 @@ namespace audition
 
     /*  Where a style's energy is allowed to sit, in Hz.
 
-        Measured from the library with the same code that measures a candidate
-        (`vrtest --corpus=40 --styles=Bass`). Hand-made presets land at a median
-        of 632 Hz for bass, 1164 for keys, 1432 for pad and 2789 for lead, so a
-        generated bass reading 8 kHz is not a dark bass or a bright bass, it is
-        not a bass. The ceilings sit above each style's median with room for
-        character, and tighter than the corpus p90 for bass because a bass is
-        the one style where the whole point is the bottom end.
+        Measured once across a library of hand-made presets, with the same code
+        that measures a candidate. They land at a median of 632 Hz for bass,
+        1164 for keys, 1432 for pad and 2789 for lead, so a generated bass
+        reading 8 kHz is not a dark bass or a bright bass, it is not a bass. The
+        ceilings sit above each style's median with room for character, and
+        tighter than their p90 for bass, because a bass is the one style where
+        the whole point is the bottom end.
     */
     struct Brightness { float low, high; };
-    Brightness brightnessFor (const std::string& style);
+
+    /*  `complexity` widens the ceiling a little.
+
+        More oscillators, a noise layer and a second filter all add harmonics,
+        so a patch asked to use more of the synth genuinely reads brighter.
+        Holding it to the same ceiling as a sparse one rejected almost every
+        complex patch rather than every wrong one.
+    */
+    Brightness brightnessFor (const std::string& style, float complexity = 0.5f);
 
     /** Sentinel meaning a style may ring for as long as it likes. */
     inline constexpr float kNoHeldLimit = 1.0e9f;
@@ -94,7 +103,20 @@ namespace audition
         pitch has to be the one on the keyboard. Effects and experiments are
         under no such obligation, and percussion is mostly not pitched at all.
     */
-    struct PitchRule { bool required; float minSalience, maxErrorSemitones; };
+    /*  `octavesOnly` says whether the note has to be the one that was pressed.
+
+        For a melodic style it does: an octave is the same note, a fifth is not.
+        A sequence is different, because stepping between pitches is the whole
+        idea. Its steps are quantised to semitones elsewhere, so measuring one
+        against the root and calling a perfect fourth wrong rejected patches
+        that were doing exactly what they were designed to.
+    */
+    struct PitchRule
+    {
+        bool required;
+        float minSalience, maxErrorSemitones;
+        bool octavesOnly = true;
+    };
     PitchRule pitchRuleFor (const std::string& style);
 
     /*  Let a freshly loaded patch settle.

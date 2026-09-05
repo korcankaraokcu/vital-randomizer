@@ -2,27 +2,24 @@
 
 A VST3 instrument that hosts Vital and generates new presets into it while you
 play. Your MIDI passes straight through, so the keyboard plays the hosted synth
-exactly as it would if Vital were on the track directly, and rolling a new patch
-does not involve a file dialog or the preset browser.
+exactly as it would if Vital were on the track directly, and a new patch arrives
+in one keystroke.
 
-Pick a style, move the four character sliders, press ROLL. Patches are built by
-splicing presets out of your own library and synthesising fresh wavetables, and
-every candidate is rendered and checked before you hear it. Silent patches, ones
-that clip, ones sounding a different note than the key you pressed, and basses
-that drone when they should be short all get thrown away and rolled again.
+Pick a style, move the sliders, press ROLL. Each style starts from a patch
+designed to be that style, the sliders move it, and the wavetables are written
+from scratch every time. Every candidate is then rendered and
+checked before you hear it: silent patches, ones that clip, ones sounding a
+different note than the key you pressed, and basses that drone when they should
+be short all get thrown away and rolled again.
 
 ## Requirements
 
 - **Vital**, any tier. The plugin finds your installed copy and hosts it.
-- **A preset library**, normally `Documents/Vital`. The generator learns what
-  each style is made of by reading it, so this is not optional. Vital's own
-  factory presets are a thin starting point and more presets give noticeably
-  better results.
 - A host that loads VST3.
 
-Nothing from your library is redistributed. Wavetables are written from scratch
-rather than copied out of presets, so a generated patch carries no data from
-anybody's pack.
+A fresh Vital install is enough. Every patch is built from scratch: the
+wavetables are synthesised per roll and the parameters come from designed
+starting points, so what it makes is yours.
 
 ## Install
 
@@ -35,18 +32,22 @@ Grab the latest build from the [releases page](../../releases) and put
 | macOS | `~/Library/Audio/Plug-Ins/VST3` |
 | Linux | `~/.vst3` |
 
-Rescan plugins in your DAW. On first run it reads your preset library, which
-takes a few seconds and is cached afterwards.
+Rescan plugins in your DAW.
 
 ## Using it
 
-- **ROLL** makes a fresh patch from the style and the four sliders.
+- **ROLL** makes a fresh patch from the style and the sliders.
+- **BRIGHT / MOVE / DIRT / SPACE** set the character. **COMPLEX** sets how much
+  of the synth a patch is allowed to use, from one oscillator through one filter
+  to three oscillators, both filters and a wall of modulation. Each style starts
+  where that style usually sits and individual rolls vary around it, so a batch
+  holds both sparse patches and busy ones.
 - **VARY** drifts the current patch instead of replacing it, with the small
   slider beside it setting how far.
 - **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
 - **&lt; &gt;** walk the candidate history, **KEEP** stars one, **EXPORT** writes
   a `.vital` file.
-- **...** locates Vital or rescans your library if either moved.
+- **...** locates Vital if it moved.
 
 Everything saves with the DAW project, including the patch that was playing.
 

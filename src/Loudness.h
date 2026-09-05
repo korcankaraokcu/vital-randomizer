@@ -12,8 +12,8 @@
     peak ceiling on top to catch anything that would clip.
 
     The targets come from measuring hand-made presets out of a real library
-    through the same code the plugin uses (`vrtest --corpus=45`). Measuring them
-    any other way is worthless: the level here is the 90th percentile of the
+    through the same code the plugin uses. Measuring them any other way is
+    worthless: the level here is the 90th percentile of the
     short-term windows, and a target carried over from a plain average is just a
     number that happens to look reasonable. Those presets sit at a median level
     of 0.135 and a p90 peak of 0.799, so a generated patch aimed at that lands

@@ -13,7 +13,6 @@ same patches, played in Vital itself, were nothing like them.
     python measure.py level      out/
     python measure.py pitch      out/
     python measure.py held       out/Bass_01.vital
-    python measure.py provenance out/       (how much came from library presets)
 """
 import argparse
 import collections
@@ -172,58 +171,16 @@ def cmd_held(args):
                  " ".join("%.2f" % relative[i] for i in range(0, 24, 3))))
 
 
-def cmd_provenance(args):
-    """How much of a generated patch came verbatim out of the preset library.
-
-    Counting every parameter overstates it badly, because unused slots sit at
-    their defaults and match almost anything. Only parameters moved away from
-    Vital's own defaults say something about what was copied."""
-    plugin, template = open_vital(args.vst3)
-    init = vitalstate.read(bytes(plugin.raw_state))["settings"]
-
-    library = {}
-    for path in glob.glob(os.path.join(args.library, "**", "*.vital"), recursive=True):
-        try:
-            library[path] = json.load(open(path, encoding="utf-8"))["settings"]
-        except Exception:
-            pass
-    if not library:
-        raise SystemExit("no presets found under %s" % args.library)
-
-    total = matched = 0
-    for path in files_in(args.target):
-        settings = json.load(open(path, encoding="utf-8"))["settings"]
-        authored = {k: float(v) for k, v in settings.items()
-                    if isinstance(v, (int, float))
-                    and not (k in init and isinstance(init[k], (int, float))
-                             and abs(float(init[k]) - float(v)) < 1e-6)}
-        best, score = None, 0
-        for source, values in library.items():
-            n = sum(1 for k, v in authored.items()
-                    if k in values and abs(float(values[k]) - v) < 1e-6)
-            if n > score:
-                score, best = n, source
-        total += len(authored)
-        matched += score
-        print("  %-22s %3d authored, %3d shared with %s"
-              % (os.path.basename(path), len(authored), score,
-                 os.path.basename(best) if best else "-"))
-    print("\n  %d of %d authored parameters found in some library preset (%.0f%%)"
-          % (matched, total, 100.0 * matched / max(1, total)))
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=["level", "pitch", "held", "provenance"])
+    parser.add_argument("command", choices=["level", "pitch", "held"])
     parser.add_argument("target", nargs="?", default="../out",
                         help="a .vital file or a folder of them")
     parser.add_argument("--vst3", default=None, help="path to Vital.vst3")
-    parser.add_argument("--library", default=os.path.expanduser("~/Documents/Vital"),
-                        help="preset library, for provenance")
     args = parser.parse_args()
 
     {"level": cmd_level, "pitch": cmd_pitch,
-     "held": cmd_held, "provenance": cmd_provenance}[args.command](args)
+     "held": cmd_held}[args.command](args)
 
 
 if __name__ == "__main__":

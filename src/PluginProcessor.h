@@ -9,7 +9,6 @@
 #include "CandidateStore.h"
 #include "Generator.h"
 #include "Loudness.h"
-#include "StyleModel.h"
 #include "VitalHost.h"
 
 /*
@@ -17,15 +16,15 @@
 
     It hosts Vital, passes the track's MIDI straight through so the keyboard
     still plays, and pushes generated patches into it. Everything slow happens
-    on a worker thread: scanning the user's preset library on first run, reading
-    donor presets, and the state load itself.
+    on a worker thread: generating a candidate, auditioning it, and the state
+    load itself.
 */
 class VitalRandomizerProcessor : public juce::AudioProcessor,
                                  public juce::ChangeBroadcaster,
                                  private juce::Thread
 {
 public:
-    enum class Job { none, buildModel, rollNew, vary, recall, reloadCurrent };
+    enum class Job { none, rollNew, vary, recall, reloadCurrent };
 
     struct Status
     {
@@ -33,7 +32,6 @@ public:
         float progress = -1.0f;      // negative means indeterminate or idle
         bool working = false;
         bool vitalReady = false;
-        bool modelReady = false;
     };
 
     VitalRandomizerProcessor();
@@ -86,10 +84,8 @@ public:
 
     void setHistoryLimit (size_t limit);
 
-    /** Point the randomizer at a different Vital binary or preset library. */
+    /** Point the randomizer at a different Vital binary. */
     void locateVital (const juce::File& vst3);
-    void rescanLibrary (const juce::File& root);
-    juce::File libraryRoot() const { return currentLibrary; }
 
     Status status() const;
     std::vector<std::string> availableStyles() const;
@@ -108,7 +104,6 @@ private:
     void run() override;
     void enqueue (Job job);
     void performRoll (Job job);
-    void buildModelNow();
     void setStatus (const juce::String& message, float progress, bool working);
     void applyResult (gen::Result& result, bool pushToHistory);
     gen::Request buildRequest() const;
@@ -126,7 +121,6 @@ private:
         reject a bad patch at all.
     */
     VitalHost preview;
-    model::StyleModel styleModel;
     std::unique_ptr<gen::Generator> generator;
     store::CandidateStore candidateStore;
 
@@ -142,7 +136,6 @@ private:
     std::set<schema::Section> locks;
     std::atomic<float> varyDepth { 0.25f };
 
-    juce::File currentLibrary;
     juce::File vitalPath;
 
     mutable juce::CriticalSection statusLock;

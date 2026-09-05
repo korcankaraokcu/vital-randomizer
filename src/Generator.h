@@ -4,24 +4,24 @@
 #include <random>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "Archetypes.h"
 #include "Schema.h"
-#include "WavetableFactory.h"
-#include "StyleModel.h"
 
 /*
-    Corpus-driven Vital patch generator.
+    Builds a Vital patch.
 
-    Patches are built by splicing real presets rather than by drawing 450
-    numbers out of thin air, which produces silence or noise essentially every
-    time. Each section is taken whole from a donor preset of the requested
-    style, keeping the internal correlations that make a patch sound
-    deliberate, and the character axes then re-sample their own parameters from
-    the distribution that style actually shows.
+    Every patch starts from Vital's own init state with a designed archetype
+    applied over it, so a bass begins life as a bass. The character axes then
+    move the parameters they own, a jitter nudges the rest inside explicit
+    ranges, the wavetables are synthesised, the modulation is wired, and the
+    result is repaired into something that will make a sound.
+
+    Everything it needs is in this repository and in Vital's own init state, so
+    a fresh Vital install is enough to roll a patch.
 */
 namespace gen
 {
@@ -33,9 +33,14 @@ namespace gen
         std::string style;
         std::unordered_map<std::string, float> sliders;   // axis key -> 0..1
         float amount = 1.0f;
+        /*  How far a roll may wander from the complexity it was handed. One is
+            the normal spread that keeps a batch from sounding uniform. Zero
+            pins it, which is what a deliberate sweep across the range needs.
+        */
+        float complexityWobble = 1.0f;
         std::set<schema::Section> locks;
         const nlohmann::json* base = nullptr;             // VARY starts from this
-        std::set<schema::Section> varySections;           // which sections VARY respices
+        std::set<schema::Section> varySections;
         unsigned int seed = 0;                            // 0 picks one
         std::string name;
     };
@@ -55,60 +60,33 @@ namespace gen
     class Generator
     {
     public:
-        explicit Generator (const model::StyleModel& m) : styleModel (m) {}
+        Generator() = default;
+
+        /** Vital's own init patch, read from a fresh instance. Every roll is
+            built on top of it, so the generator needs it before it can work. */
+        void setInitPreset (nlohmann::json preset) { initPreset = std::move (preset); }
+        bool isReady() const { return ! initPreset.is_null(); }
 
         Result roll (const Request& request);
 
-        /*  Vital's own default sample, taken from a fresh instance.
-
-            Donor presets carry whatever audio their pack author recorded, and
-            names like "River" and "Jack Hammer" across the library make it
-            clear that is licensed content rather than anything generic. Vital's
-            own noise sample ships with the synth, so it is the one safe thing
-            to fall back on.
-        */
-        void setDefaultSample (nlohmann::json sample) { defaultSample = std::move (sample); }
-
-        /** Donor presets are 1 MB or so each and get reused across rolls, so
-            they are kept parsed. The cache is bounded because a long session
-            would otherwise hold the whole library in memory. */
-        void clearDonorCache();
-        size_t donorCacheSize() const { return donorCache.size(); }
+        static std::vector<std::string> styles() { return archetype::styleNames(); }
 
     private:
-        const nlohmann::json* donor (const std::string& path);
-        const nlohmann::json* pickDonor (const model::Style& style, std::mt19937& rng);
-
-        bool sampleValue (const model::Style& style, const std::string& param,
-                          float percentile, std::mt19937& rng, float& out) const;
-
-        void splice (const model::Style& style, const Request& r,
-                     nlohmann::json& doc, std::mt19937& rng);
-        void applyAxes (const model::Style& style, const Request& r,
-                        nlohmann::json& settings, std::mt19937& rng);
-        void wireMovement (const model::Style& style, const Request& r,
-                           nlohmann::json& settings, std::mt19937& rng);
-        void wireMacros (const model::Style& style, const Request& r,
-                         nlohmann::json& doc, nlohmann::json& settings, Result& result);
-        void applyChoices (
-            const std::unordered_map<std::string, std::vector<std::pair<float, int>>>& choices,
-            const Request& r, nlohmann::json& settings, std::mt19937& rng);
-        void applyStyleEssentials (const model::Style& style, const Request& r,
-                                   nlohmann::json& settings, std::mt19937& rng);
-        void applyNoteShape (const model::Style& style, const Request& r,
-                             nlohmann::json& settings, std::mt19937& rng);
-        void constrainPitch (const Request& r, nlohmann::json& settings, std::mt19937& rng);
-        void applyIdentity (const model::Style& style, const Request& r,
-                            nlohmann::json& settings, std::mt19937& rng);
-        std::vector<std::string> repair (const model::Style& style,
-                                         nlohmann::json& settings);
+        void applyArchetype (const archetype::Archetype& a, const Request& r,
+                             nlohmann::json& settings);
+        void applyComplexity (const Request& r, nlohmann::json& settings, std::mt19937& rng);
         void synthesiseContent (const Request& r, nlohmann::json& settings,
                                 std::mt19937& rng);
+        void applyAxes (const Request& r, nlohmann::json& settings, std::mt19937& rng);
+        void applyNoteShape (const Request& r, nlohmann::json& settings, std::mt19937& rng);
+        void wireRouting (const archetype::Archetype& a, const Request& r,
+                          nlohmann::json& settings, std::mt19937& rng);
+        void wireMacros (const Request& r, nlohmann::json& doc,
+                         nlohmann::json& settings, Result& result);
+        void constrainPitch (const Request& r, nlohmann::json& settings, std::mt19937& rng);
+        std::vector<std::string> repair (nlohmann::json& settings);
 
-        const model::StyleModel& styleModel;
-        nlohmann::json defaultSample;
-        std::unordered_map<std::string, nlohmann::json> donorCache;
-        std::vector<std::string> donorOrder;
+        nlohmann::json initPreset;
     };
 
     /** Bend a uniform percentile toward one end without piling up on it. */

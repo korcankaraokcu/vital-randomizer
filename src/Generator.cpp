@@ -7,15 +7,13 @@
 #include <juce_core/juce_core.h>
 
 #include "Axes.h"
-#include "WavetableFactory.h"
 #include "Loudness.h"
+#include "WavetableFactory.h"
 
 namespace gen
 {
     namespace
     {
-        constexpr size_t kDonorCacheLimit = 48;
-
         float uniform (std::mt19937& rng)
         {
             return std::uniform_real_distribution<float> (0.0f, 1.0f) (rng);
@@ -60,17 +58,29 @@ namespace gen
             return {};
         }
 
-        void setModSlot (nlohmann::json& settings, int index, const std::string& source,
+        bool setModSlot (nlohmann::json& settings, const std::string& source,
                          const std::string& dest, float amount, bool bipolar)
         {
-            settings["modulations"][static_cast<size_t> (index)] =
-                { { "destination", dest }, { "source", source } };
-            const auto n = std::to_string (index + 1);
-            settings["modulation_" + n + "_amount"] = amount;
-            settings["modulation_" + n + "_bypass"] = 0.0;
-            settings["modulation_" + n + "_bipolar"] = bipolar ? 1.0 : 0.0;
-            settings["modulation_" + n + "_power"] = 0.0;
-            settings["modulation_" + n + "_stereo"] = 0.0;
+            if (source.empty() || dest.empty() || ! settings.contains (dest))
+                return false;
+
+            auto& mods = settings["modulations"];
+            for (int slot = 0; slot < kModSlots; ++slot)
+            {
+                const auto index = static_cast<size_t> (slot);
+                if (! modSource (mods[index]).empty())
+                    continue;
+
+                mods[index] = { { "destination", dest }, { "source", source } };
+                const auto n = std::to_string (slot + 1);
+                settings["modulation_" + n + "_amount"] = amount;
+                settings["modulation_" + n + "_bypass"] = 0.0;
+                settings["modulation_" + n + "_bipolar"] = bipolar ? 1.0 : 0.0;
+                settings["modulation_" + n + "_power"] = 0.0;
+                settings["modulation_" + n + "_stereo"] = 0.0;
+                return true;
+            }
+            return false;
         }
 
         // Real preset authors name macros after the thing they move: REVERB,
@@ -97,7 +107,6 @@ namespace gen
                 { std::regex ("_unison_detune$"), "DETUNE" },
                 { std::regex ("_level$"), "LEVEL" },
                 { std::regex ("_frequency$"), "RATE" },
-                { std::regex ("^modulation_\\d+_amount$"), "DEPTH" },
             };
             return rules;
         }
@@ -142,6 +151,49 @@ namespace gen
                     return settings.value (p.second, 1.0) >= 0.5;
             return true;
         }
+
+        /*  How long a note should ring, per style.
+
+            A musical judgement rather than anything measured. A bass preset in
+            a real library usually shows a full sustain, because the player is
+            the one making the notes short, and reading that literally gives a
+            bass that drones when you hold a key.
+
+            Values run -1 for short to +1 for long. Sustain also gets a hard
+            ceiling where a style is meant to be struck, since leaning alone is
+            not enough, and the decay band is where the body of a struck note
+            actually comes from: measured against a held note, a decay of 1.00
+            is gone in half a second and 1.25 lasts about 1.1.
+        */
+        struct NoteShape
+        {
+            float attack, decay, sustain, release;
+            float sustainCeiling;
+            float releaseFloor, releaseCeiling;
+            float decayFloor, decayCeiling;
+        };
+
+        NoteShape noteShapeFor (const std::string& style)
+        {
+            //                        attack  decay  sustain release susCeil relLo relHi  decLo decHi
+            if (style == "Bass")       return { -0.5f, +0.3f, -1.0f, -0.4f, 0.0f,  0.15f, 0.45f, 1.08f, 1.30f };
+            if (style == "Percussion") return { -0.8f, -0.2f, -1.0f, -0.5f, 0.0f,  0.10f, 0.35f, 0.88f, 1.12f };
+            if (style == "Keys")       return { -0.4f, +0.1f, -0.6f, -0.2f, 0.55f, 0.20f, 0.0f,  1.00f, 1.28f };
+            if (style == "Lead")       return { -0.1f, +0.2f, +0.4f, +0.3f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
+            if (style == "Pad")        return { +0.7f, +0.5f, +0.7f, +0.6f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
+            if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
+            return { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        }
+
+        /** A value inside the parameter's range, at the given percentile. */
+        bool sampleInRange (const std::string& param, float percentile, float& out)
+        {
+            float low = 0.0f, high = 0.0f;
+            if (! archetype::rangeFor (param, low, high))
+                return false;
+            out = low + juce::jlimit (0.0f, 1.0f, percentile) * (high - low);
+            return true;
+        }
     }
 
     float skew (float p, float pull)
@@ -158,118 +210,160 @@ namespace gen
         return pull > 0.0f ? std::pow (p, 1.0f / gain) : std::pow (p, gain);
     }
 
-    void Generator::clearDonorCache()
+    // ------------------------------------------------------------ archetype ---
+
+    void Generator::applyArchetype (const archetype::Archetype& a, const Request& r,
+                                    nlohmann::json& settings)
     {
-        donorCache.clear();
-        donorOrder.clear();
-    }
-
-    const nlohmann::json* Generator::donor (const std::string& path)
-    {
-        const auto it = donorCache.find (path);
-        if (it != donorCache.end())
-            return &it->second;
-
-        const juce::File file { juce::String (path) };
-        if (! file.existsAsFile())
-            return nullptr;
-
-        auto doc = nlohmann::json::parse (file.loadFileAsString().toStdString(), nullptr, false);
-        if (doc.is_discarded() || ! doc.contains ("settings") || ! doc["settings"].is_object())
-            return nullptr;
-
-        if (donorOrder.size() >= kDonorCacheLimit)
+        for (const auto& setting : a.settings)
         {
-            donorCache.erase (donorOrder.front());
-            donorOrder.erase (donorOrder.begin());
+            const std::string name (setting.name);
+            if (r.locks.count (schema::sectionOf (name)) > 0)
+                continue;
+            settings[name] = setting.value;
         }
-        donorOrder.push_back (path);
-        return &(donorCache[path] = std::move (doc));
     }
 
-    const nlohmann::json* Generator::pickDonor (const model::Style& style, std::mt19937& rng)
+    void Generator::applyComplexity (const Request& r, nlohmann::json& settings,
+                                     std::mt19937& rng)
     {
-        if (style.donors.empty())
-            return nullptr;
-        std::uniform_int_distribution<size_t> pick (0, style.donors.size() - 1);
-        for (int attempt = 0; attempt < 8; ++attempt)
-            if (const auto* d = donor (style.donors[pick (rng)]))
-                return d;
-        return nullptr;
-    }
+        /*  How much of the synth a patch is allowed to use.
 
-    bool Generator::sampleValue (const model::Style& style, const std::string& param,
-                                 float percentile, std::mt19937& rng, float& out) const
-    {
-        const auto c = style.continuous.find (param);
-        if (c != style.continuous.end())
-        {
-            out = style.sample (c->second, percentile);
-            return true;
-        }
+            Without this every roll used about the same amount of Vital, and
+            that uniformity is what reads as dull. Measured against a real
+            library, hand-made presets author anywhere from 5 to 231 parameters
+            and wire between 0 and 64 modulations, while the generator sat in a
+            narrow band around 96 and 10. Some patches should be a single
+            oscillator through one filter, and some should be everything at
+            once.
+        */
+        const auto complexity = r.sliders.count ("complexity") > 0
+                                    ? r.sliders.at ("complexity") : 0.5f;
 
-        const auto d = style.discrete.find (param);
-        if (d != style.discrete.end() && ! d->second.empty())
+        const auto chance = [&] (float at) { return complexity > at && uniform (rng) < complexity; };
+
+        /*  Two of the things below fight a style that has to stop dead. Noise
+            runs flat all the way up, so it drags a bass toward the brightness
+            ceiling, and a phaser or flanger keeps ringing after the key is
+            released. Leaving them out for those styles costs nothing audible
+            and stops the screen throwing most of the batch away.
+        */
+        const auto mustStopDead = r.style == "Bass" || r.style == "Percussion";
+
+        if (r.locks.count (schema::Section::osc) == 0)
         {
-            int total = 0;
-            for (const auto& choice : d->second)
-                total += choice.second;
-            if (total <= 0)
-                return false;
-            auto pick = std::uniform_int_distribution<int> (0, total - 1) (rng);
-            for (const auto& choice : d->second)
+            // A third oscillator and a noise layer are the two cheapest ways to
+            // thicken a patch, and the two most obvious when they are missing.
+            if (chance (0.30f))
             {
-                pick -= choice.second;
-                if (pick < 0)
+                /*  The third oscillator is a layer, not a harmony part.
+
+                    Most of the time it sits at unison and earns its place
+                    through its own wavetable, voice count and detune, which is
+                    what layering usually means on a synth. Octaves are the
+                    other move that never argues with anything.
+
+                    Fixed intervals are what to avoid, and not for a measurement
+                    reason. A patch that adds a fifth to every note is choosing
+                    harmony on the player's behalf, and a major third stack is
+                    plainly wrong over half of what somebody plays. The octave
+                    also happens to be the only exact one: an equal tempered
+                    fifth is 1.4983 rather than 1.5, so root and fifth never
+                    share a period and the sound has no single pitch to hear.
+                    Sequences came out 4.77 semitones off the key pressed.
+                */
+                settings["osc_3_on"] = 1.0;
+                settings["osc_3_level"] = 0.15 + 0.25 * uniform (rng);
+
+                const auto pick = uniform (rng);
+                const auto semitones = mustStopDead ? (pick < 0.5f ?   0.0 : -12.0)
+                                     : pick < 0.45f ?  0.0
+                                     : pick < 0.75f ? -12.0
+                                                    :  12.0;
+                settings["osc_3_transpose"] = semitones;
+
+                if (semitones == 0.0)
                 {
-                    out = choice.first;
-                    return true;
+                    // A unison layer has to justify itself some other way.
+                    settings["osc_3_unison_voices"] = std::floor (3.0 + uniform (rng) * 5.0);
+                    settings["osc_3_unison_detune"] = 1.5 + uniform (rng) * 3.5;
                 }
+
+                /*  Vital's own unison stack styles, indices measured by
+                    rendering each one rather than read off the enum:
+
+                      0 unison        1 drop 12     2 drop 24
+                      3 octave        4 2x octave   5 power chord
+                      6 2x power      7 major       8 minor
+                      9 harmonics    10 odd harmonics
+
+                    Five through eight are the fixed intervals, so pitched
+                    styles get the octave pair and a bass gets the sub. SFX and
+                    Experiment have no pitch rule because they are sounds rather
+                    than notes, so there the chords are fair game.
+                */
+                if (r.style == "SFX" || r.style == "Experiment")
+                    settings["osc_3_stack_style"] = std::floor (uniform (rng) * 11.0);
+                else if (uniform (rng) < 0.35f)
+                    settings["osc_3_stack_style"] = mustStopDead ? 1.0
+                                                 : uniform (rng) < 0.5f ? 3.0 : 4.0;
             }
-            out = d->second.front().first;
-            return true;
+            else if (complexity < 0.25f)
+            {
+                settings["osc_2_on"] = 0.0;      // stripped right back
+            }
+
+            if (! mustStopDead && chance (0.45f))
+            {
+                settings["sample_on"] = 1.0;
+                // Kept low on purpose. Noise is flat all the way up, so it
+                // shifts a patch's brightness far more than its level suggests.
+                settings["sample_level"] = 0.07 + 0.11 * uniform (rng);
+            }
         }
-        return false;
-    }
 
-    void Generator::splice (const model::Style& style, const Request& r,
-                            nlohmann::json& doc, std::mt19937& rng)
-    {
-        auto& settings = doc["settings"];
-
-        for (int i = 0; i < schema::numSections; ++i)
+        /*  The second filter. Forty two percent of hand-made presets use one and
+            the generator never did, which left a whole dimension of the synth
+            untouched. Serial puts it after the first, parallel gives the second
+            oscillator its own path.
+        */
+        if (r.locks.count (schema::Section::filter) == 0 && chance (0.35f))
         {
-            const auto section = static_cast<schema::Section> (i);
-            if (r.locks.count (section) > 0)
-                continue;
-            // VARY keeps the patch it started from and only respices the
-            // sections it was asked to, so the sound drifts instead of being
-            // replaced.
-            if (r.base != nullptr && r.varySections.count (section) == 0)
-                continue;
+            settings["filter_2_on"] = 1.0;
+            settings["filter_2_model"] = std::floor (uniform (rng) * 4.0f);
+            settings["filter_2_cutoff"] = 38.0 + uniform (rng) * 42.0;
+            // Resonance rings on after the key is up, which is exactly what a
+            // bass or a hit must not do.
+            settings["filter_2_resonance"] = 0.1 + uniform (rng) * (mustStopDead ? 0.15 : 0.4);
+            settings["filter_2_mix"] = 0.5 + 0.5 * uniform (rng);
 
-            const auto* d = pickDonor (style, rng);
-            if (d == nullptr)
-                continue;
-            const auto& ds = (*d)["settings"];
+            if (uniform (rng) < 0.5f)
+            {
+                settings["filter_2_filter_input"] = 1.0;    // after filter one
+            }
+            else if (settings.value ("osc_2_on", 0.0) >= 0.5)
+            {
+                settings["filter_2_filter_input"] = 0.0;
+                settings["osc_2_destination"] = 1.0;        // its own path
+            }
+        }
 
-            for (auto it = ds.begin(); it != ds.end(); ++it)
-                if (it.value().is_number() && schema::sectionOf (it.key()) == section)
-                    settings[it.key()] = it.value().get<double>();
-
-            // Structural blobs travel with the section that owns them. Split
-            // them apart and you get oscillator settings pointing at a
-            // wavetable written for a completely different patch.
-            // Wavetables, the sample and the LFO shapes are all replaced with
-            // generated ones afterwards, so there is no point copying the
-            // donor's. Everything else in the section still travels together.
-            for (const auto& blob : schema::blobNames())
-                if (schema::blobOwner (blob) == section && ds.contains (blob)
-                    && blob != "wavetables" && blob != "sample")
-                    settings[blob] = ds[blob];
-
-            if (section == schema::Section::mod && ds.contains ("modulations"))
-                settings["modulations"] = ds["modulations"];
+        if (r.locks.count (schema::Section::fx) == 0)
+        {
+            // Effects are where a simple patch and an involved one differ most
+            // audibly, so the sparse end really does switch things off.
+            if (complexity < 0.3f)
+            {
+                for (const auto& fx : { "phaser_on", "flanger_on", "chorus_on" })
+                    if (settings.contains (fx))
+                        settings[fx] = 0.0;
+            }
+            else if (! mustStopDead)
+            {
+                for (const auto& fx : { "phaser_on", "flanger_on" })
+                    if (settings.contains (fx) && chance (0.55f))
+                        settings[fx] = 1.0;
+            }
         }
     }
 
@@ -284,11 +378,12 @@ namespace gen
         const auto bright = sliderOr ("bright", 0.5f);
         const auto dirt = sliderOr ("dirt", 0.5f);
         const auto move = sliderOr ("move", 0.5f);
+        const auto complexity = sliderOr ("complexity", 0.5f);
 
-        /*  Every wavetable is written here rather than carried over from the
-            donor. That is a licensing matter first, since donor tables belong to
+        /*  Wavetables are written rather than borrowed. That is a licensing
+            matter first, since a table lifted out of a preset belongs to
             whoever made the pack, but it is also where the variety comes from:
-            a fixed set of donor tables meant the same timbres kept turning up.
+            a fixed set of tables means the same timbres keep turning up.
         */
         nlohmann::json tables = nlohmann::json::array();
         for (int i = 1; i <= 3; ++i)
@@ -298,12 +393,12 @@ namespace gen
             wr.bright = bright;
             wr.dirt = dirt;
             wr.move = move;
+            wr.complexity = complexity;
             wr.oscillator = i;
             tables.push_back (wavetable::create (rng, wr));
         }
         settings["wavetables"] = std::move (tables);
 
-        // LFO shapes are authored content too, and cheap to write.
         if (settings.contains ("lfos") && settings["lfos"].is_array())
         {
             auto& lfos = settings["lfos"];
@@ -311,13 +406,12 @@ namespace gen
                 if (i < 4 || uniform (rng) < 0.5f)
                     lfos[i] = wavetable::createLfoShape (rng, move);
         }
-
-        if (! defaultSample.is_null())
-            settings["sample"] = defaultSample;
     }
 
-    void Generator::applyAxes (const model::Style& style, const Request& r,
-                               nlohmann::json& settings, std::mt19937& rng)
+    // ----------------------------------------------------------------- axes ---
+
+    void Generator::applyAxes (const Request& r, nlohmann::json& settings,
+                               std::mt19937& rng)
     {
         const auto keys = numericKeys (settings);
         std::set<std::string> touched;
@@ -335,7 +429,7 @@ namespace gen
                     continue;
                 const auto p = skew (uniform (rng), (value - 0.5f) * 2.0f * member.second);
                 float sampled = 0.0f;
-                if (sampleValue (style, member.first, p, rng, sampled))
+                if (sampleInRange (member.first, p, sampled))
                 {
                     settings[member.first] = sampled;
                     touched.insert (member.first);
@@ -358,20 +452,15 @@ namespace gen
 
             // Indexed parameters have no meaningful ordering, since Vital's
             // eight filter models are different circuits rather than a
-            // brightness ramp, so an extreme slider flips them rather than
-            // interpolating between them.
+            // brightness ramp, so an extreme slider flips them.
             for (const auto& param : axes::flippable (axis, keys))
             {
                 if (r.locks.count (schema::sectionOf (param)) > 0)
                     continue;
                 if (uniform (rng) < push * 0.5f)
                 {
-                    float sampled = 0.0f;
-                    if (sampleValue (style, param, uniform (rng), rng, sampled))
-                    {
-                        settings[param] = sampled;
-                        touched.insert (param);
-                    }
+                    settings[param] = std::floor (uniform (rng) * 6.0f);
+                    touched.insert (param);
                 }
             }
         }
@@ -379,15 +468,20 @@ namespace gen
         if (r.amount <= 0.0f)
             return;
 
-        /*  `amount` jitters everything the axes did not claim, nudging each
-            value along its own distribution from wherever the donor left it
-            rather than drawing a fresh independent one. Independent draws look
-            like more variety and are in fact worse: a low cutoff belongs with a
-            short decay and a lot of resonance, and resampling the three
-            separately throws away exactly the correlations that make a donor
-            sound like a deliberate patch.
+        /*  Jitter everything the axes did not claim, but only within its range,
+            and only where a range is defined. Parameters without one keep the
+            archetype's value.
+
+            This is narrower than it used to be on purpose. The old jitter
+            wandered across roughly half of four hundred parameters, and most of
+            that motion did nothing but blur a design that was already right.
         */
-        const auto spread = 0.10f * r.amount;
+        const auto complexity = r.sliders.count ("complexity") > 0
+                                    ? r.sliders.at ("complexity") : 0.5f;
+        // How far each value moves and how many of them move at all. A sparse
+        // patch should stay close to its archetype.
+        const auto spread = juce::jmap (complexity, 0.0f, 1.0f, 0.07f, 0.26f) * r.amount;
+        const auto breadth = juce::jmap (complexity, 0.0f, 1.0f, 0.25f, 0.85f);
         for (const auto& key : keys)
         {
             if (touched.count (key) > 0)
@@ -395,169 +489,168 @@ namespace gen
             const auto section = schema::sectionOf (key);
             if (section == schema::Section::excluded || r.locks.count (section) > 0)
                 continue;
-            if (uniform (rng) > r.amount * 0.5f)
+            if (uniform (rng) > r.amount * breadth)
                 continue;
 
-            const auto c = style.continuous.find (key);
-            if (c == style.continuous.end())
-            {
-                if (uniform (rng) < r.amount * 0.06f)
-                {
-                    float sampled = 0.0f;
-                    if (sampleValue (style, key, uniform (rng), rng, sampled))
-                        settings[key] = sampled;
-                }
+            float low = 0.0f, high = 0.0f;
+            if (! archetype::rangeFor (key, low, high))
                 continue;
-            }
 
             const auto current = settings[key].get<float>();
-            auto p = model::Style::percentileOf (c->second, current);
-            p = std::max (0.0f, std::min (1.0f, p + gaussian (rng, spread)));
-            settings[key] = style.sample (c->second, p);
+            const auto at = (current - low) / juce::jmax (1.0e-6f, high - low);
+            const auto moved = juce::jlimit (0.0f, 1.0f, at + gaussian (rng, spread));
+            settings[key] = low + moved * (high - low);
         }
     }
 
-    void Generator::wireMovement (const model::Style& style, const Request& r,
-                                  nlohmann::json& settings, std::mt19937& rng)
+    void Generator::applyNoteShape (const Request& r, nlohmann::json& settings,
+                                    std::mt19937& rng)
     {
-        const auto* axis = axes::find ("move");
-        if (axis == nullptr || ! axis->hasWiring)
+        if (r.locks.count (schema::Section::env) > 0)
             return;
 
-        const auto slider = r.sliders.count ("move") > 0 ? r.sliders.at ("move") : 0.5f;
-
-        ensureModSlots (settings);
-        auto& mods = settings["modulations"];
-
-        int used = 0;
-        std::set<std::pair<std::string, std::string>> taken;
-        for (const auto& slot : mods)
-        {
-            const auto src = modSource (slot);
-            if (! src.empty())
-            {
-                ++used;
-                taken.insert ({ src, modDest (slot) });
-            }
-        }
-
-        /*  The slider scales around what presets in this style actually use,
-            rather than adding on top of whatever the donor happened to carry.
-
-            Getting this wrong is what made neutral settings produce static
-            patches: a spliced donor can arrive with nothing wired but its
-            macros, and a patch whose only modulation is four macros sitting at
-            their default position does not move at all. Every hand-made preset
-            in the library has real modulation, so a generated one starts from
-            the same place and the slider moves it from there.
-        */
-        const auto median = juce::jlimit (4, 40, style.medianRoutings);
-        const auto scale = slider <= 0.5f
-            ? juce::jmap (slider, 0.0f, 0.5f, 0.35f, 1.0f)
-            : juce::jmap (slider, 0.5f, 1.0f, 1.0f, 2.2f);
-        const auto target = juce::jlimit (3, kModSlots - kMacros,
-                                          juce::roundToInt (median * scale));
-
-        /*  Routings come from what this style actually wires, not one list
-            shared by every style.
-
-            This is what separates a bass from a drone. The most common routing
-            in the bass presets by a wide margin is a decaying envelope closing
-            the filter, which is where the pluck comes from, while a sequence is
-            LFOs sweeping pitch and level. Wiring both from a single hardcoded
-            list gave basses seven LFOs at full depth and no filter envelope at
-            all, which is a perfectly good experimental patch and not a bass.
-        */
-        const auto& available = style.modRoutings;
-        if (available.empty())
-            return;
-
-        int totalWeight = 0;
-        for (const auto& routing : available)
-            totalWeight += routing.count;
-        if (totalWeight <= 0)
-            return;
-
-
-        const auto depthFor = [&]
-        {
-            if (! style.hasModDepth)
-                return 0.15f + uniform (rng) * 0.45f;
-            // Drawn from the depths the style really uses. Bass sits near 0.38,
-            // pad near 0.26, and a flat 0.75 everywhere was most of why patches
-            // came out overwrought.
-            const auto p = juce::jlimit (0.05f, 0.95f,
-                                         uniform (rng) * juce::jmap (slider, 0.6f, 1.0f));
-            return juce::jlimit (0.05f, 1.0f, style.sample (style.modDepth, p));
+        const auto shape = noteShapeFor (r.style);
+        const std::pair<const char*, float> stages[] = {
+            { "env_1_attack",  shape.attack },
+            { "env_1_decay",   shape.decay },
+            { "env_1_sustain", shape.sustain },
+            { "env_1_release", shape.release },
         };
 
-        const auto place = [&] (const std::string& source, const std::string& dest) -> bool
+        for (const auto& stage : stages)
         {
-            if (source.empty() || dest.empty()
-                || taken.count ({ source, dest }) > 0 || ! settings.contains (dest))
-                return false;
-
-            for (int slot = 0; slot < kModSlots; ++slot)
-            {
-                if (! modSource (mods[static_cast<size_t> (slot)]).empty())
-                    continue;
-                setModSlot (settings, slot, source, dest, depthFor(), uniform (rng) < 0.30f);
-                taken.insert ({ source, dest });
-                ++used;
-                return true;
-            }
-            return false;
-        };
-
-        // The style's signature routing goes in first. It is the one every
-        // patch in the style is built around, so leaving it to chance is what
-        // let basses arrive without the thing that makes them basses.
-        place (available.front().source, available.front().destination);
-
-        int guard = 0;
-        while (used < target && guard++ < 400)
-        {
-
-            auto pick = std::uniform_int_distribution<int> (0, totalWeight - 1) (rng);
-            for (const auto& routing : available)
-            {
-                pick -= routing.count;
-                if (pick < 0)
-                {
-                    place (routing.source, routing.destination);
-                    break;
-                }
-            }
+            if (std::abs (stage.second) < 1.0e-6f)
+                continue;
+            float sampled = 0.0f;
+            if (sampleInRange (stage.first, skew (uniform (rng), stage.second), sampled))
+                settings[stage.first] = sampled;
         }
 
+        // A struck sound gets no sustain at all, not merely a small one. Even a
+        // sixth of the peak held forever is a note that never stops.
+        if (shape.sustainCeiling < 1.0f && settings.contains ("env_1_sustain"))
+        {
+            const auto sustain = settings["env_1_sustain"].get<float>();
+            if (sustain > shape.sustainCeiling)
+                settings["env_1_sustain"] = shape.sustainCeiling * uniform (rng);
+        }
+
+        // The body of a struck note comes from its decay, not its release.
+        if (shape.decayFloor > 0.0f && settings.contains ("env_1_decay"))
+            settings["env_1_decay"] = shape.decayFloor
+                                          + uniform (rng) * (shape.decayCeiling - shape.decayFloor);
+
+        if (settings.contains ("env_1_release"))
+        {
+            const auto release = settings["env_1_release"].get<float>();
+            if (shape.releaseFloor > 0.0f && release < shape.releaseFloor)
+                settings["env_1_release"] = shape.releaseFloor
+                                                + uniform (rng) * shape.releaseFloor;
+            else if (shape.releaseCeiling > 0.0f && release > shape.releaseCeiling)
+                settings["env_1_release"] = shape.releaseCeiling * (0.6f + 0.4f * uniform (rng));
+        }
+
+        /*  The instrument's own pitch stays where the keyboard put it. Someone
+            playing a bass part is already reaching for the bottom two octaves,
+            and a patch that drops another two lands under the speaker.
+        */
+        if (settings.contains ("osc_1_transpose")
+            && r.locks.count (schema::Section::osc) == 0)
+        {
+            const auto lowRegister = r.style == "Bass" || r.style == "Percussion";
+            const auto roll = uniform (rng);
+            if (roll < 0.86f)
+                settings["osc_1_transpose"] = 0.0;
+            else
+                settings["osc_1_transpose"] = lowRegister ? -12.0
+                                                          : (roll < 0.95f ? -12.0 : 12.0);
+        }
     }
 
-    void Generator::wireMacros (const model::Style& style, const Request& r,
-                                nlohmann::json& doc, nlohmann::json& settings,
-                                Result& result)
+    // -------------------------------------------------------------- routing ---
+
+    void Generator::wireRouting (const archetype::Archetype& a, const Request& r,
+                                 nlohmann::json& settings, std::mt19937& rng)
+    {
+        if (r.locks.count (schema::Section::mod) > 0)
+            return;
+
+        ensureModSlots (settings);
+
+        /*  The style's own routings first. These are what make it that style: a
+            bass is plucky because a decaying envelope closes its filter, and a
+            sequence moves because LFOs drive its level and pitch. Wiring both
+            from one shared list produced basses with seven LFOs and no filter
+            envelope at all, which is a fine experimental patch and not a bass.
+        */
+        const auto move = r.sliders.count ("move") > 0 ? r.sliders.at ("move") : 0.5f;
+        const auto depthScale = juce::jmap (move, 0.0f, 1.0f, 0.55f, 1.5f);
+
+        for (const auto& routing : a.routings)
+        {
+            const auto amount = juce::jlimit (0.02f, 1.0f,
+                routing.amount * depthScale * (0.85f + 0.3f * uniform (rng)));
+            setModSlot (settings, routing.source, routing.destination,
+                        amount, routing.bipolar);
+        }
+
+        /*  More routings on top, from a general pool. Motion is topology:
+            raising an LFO rate on a patch with nothing routed changes nothing
+            anyone can hear.
+
+            Both sliders feed this. MOVE asks for motion and COMPLEXITY asks for
+            more of the synth to be involved, and a patch can want either
+            without the other.
+        */
+        const auto complexity = r.sliders.count ("complexity") > 0
+                                    ? r.sliders.at ("complexity") : 0.5f;
+        if (move <= 0.5f && complexity <= 0.5f)
+            return;
+
+        static const std::vector<const char*> sources = {
+            "lfo_1", "lfo_2", "lfo_3", "random_1", "env_2" };
+        static const std::vector<const char*> destinations = {
+            "osc_1_wave_frame", "osc_2_wave_frame", "filter_1_cutoff",
+            "osc_1_spectral_morph_amount", "filter_2_cutoff", "osc_1_level",
+            "distortion_drive", "osc_1_unison_detune", "filter_1_resonance" };
+
+        const auto fromMove = juce::jmap (juce::jmax (0.0f, move - 0.5f), 0.0f, 0.5f, 0.0f, 7.0f);
+        const auto fromComplexity = juce::jmap (juce::jmax (0.0f, complexity - 0.5f),
+                                                0.0f, 0.5f, 0.0f, 9.0f);
+        const auto extra = juce::roundToInt (fromMove + fromComplexity);
+        std::uniform_int_distribution<size_t> pickSource (0, sources.size() - 1);
+        std::uniform_int_distribution<size_t> pickDest (0, destinations.size() - 1);
+
+        for (int i = 0; i < extra * 3 && i < 40; ++i)
+        {
+            int used = 0;
+            for (const auto& slot : settings["modulations"])
+                if (! modSource (slot).empty())
+                    ++used;
+            if (used >= (int) a.routings.size() + extra)
+                break;
+
+            setModSlot (settings, sources[pickSource (rng)], destinations[pickDest (rng)],
+                        0.15f + uniform (rng) * 0.5f, uniform (rng) < 0.3f);
+        }
+    }
+
+    void Generator::wireMacros (const Request& r, nlohmann::json& doc,
+                                nlohmann::json& settings, Result& result)
     {
         ensureModSlots (settings);
         auto& mods = settings["modulations"];
 
-        /*  Donor macros were wired for the donor's patch. After splicing an
-            oscillator section from one preset onto a filter from another they
-            often point somewhere that no longer means anything, so they are
-            cleared and rebuilt. Predictability matters more here than inherited
-            cleverness: macro 1 should be the same axis on every roll.
+        /*  Four wired, named macros on every patch. Macros are the most used
+            modulation source in hand-made presets, ahead of the LFOs, and
+            they are the only part a producer can automate from the host. A
+            patch without them is a sound rather than an instrument.
         */
-        for (auto& slot : mods)
-        {
-            if (modSource (slot).rfind ("macro_control", 0) == 0)
-            {
-                slot["source"] = "";
-                slot["destination"] = "";
-            }
-        }
-
+        const auto& wanted = archetype::macroDestinationsFor (r.style);
         const auto& axisList = axes::all();
+
         for (int i = 0; i < kMacros; ++i)
         {
-            const auto& axis = axisList[static_cast<size_t> (i) % axisList.size()];
             const auto source = "macro_control_" + std::to_string (i + 1);
 
             std::set<std::string> taken;
@@ -566,40 +659,31 @@ namespace gen
                     taken.insert (modDest (slot));
 
             std::vector<std::string> candidates;
+            for (const auto* d : wanted)
+                if (settings.contains (d) && taken.count (d) == 0)
+                    candidates.push_back (d);
+
+            // Fall back to the axis destinations if the style list runs out.
+            const auto& axis = axisList[static_cast<size_t> (i) % axisList.size()];
             for (const auto& d : axis.macroDests)
                 if (settings.contains (d) && taken.count (d) == 0)
                     candidates.push_back (d);
-            for (const auto& d : style.macroDests)
-                if (settings.contains (d.first) && taken.count (d.first) == 0)
-                    candidates.push_back (d.first);
 
-            // Prefer somewhere the patch can actually hear, but fall back to a
-            // dead destination rather than leaving the macro unwired.
             std::vector<std::string> live;
             for (const auto& d : candidates)
                 if (destinationIsLive (d, settings))
                     live.push_back (d);
-            const auto& wanted = live.empty() ? candidates : live;
-            if (wanted.empty())
+            const auto& usable = live.empty() ? candidates : live;
+            if (usable.empty())
                 continue;
 
-            int free = -1;
-            for (int slot = 0; slot < kModSlots; ++slot)
-            {
-                if (modSource (mods[static_cast<size_t> (slot)]).empty())
-                {
-                    free = slot;
-                    break;
-                }
-            }
-            if (free < 0)
-                break;
-
             const auto strength = r.sliders.count (axis.key) > 0 ? r.sliders.at (axis.key) : 0.5f;
-            setModSlot (settings, free, source, wanted.front(), 0.3f + 0.5f * strength, false);
-            result.macroDests[static_cast<size_t> (i)] = wanted.front();
-            if (! settings.contains (source))
-                settings[source] = 0.5;
+            if (setModSlot (settings, source, usable.front(), 0.3f + 0.5f * strength, false))
+            {
+                result.macroDests[static_cast<size_t> (i)] = usable.front();
+                if (! settings.contains (source))
+                    settings[source] = 0.5;
+            }
         }
 
         std::set<std::string> seen;
@@ -617,195 +701,15 @@ namespace gen
         }
     }
 
-    void Generator::applyChoices (
-        const std::unordered_map<std::string, std::vector<std::pair<float, int>>>& choices,
-        const Request& r, nlohmann::json& settings, std::mt19937& rng)
-    {
-        for (const auto& entry : choices)
-        {
-            if (! settings.contains (entry.first) || entry.second.empty())
-                continue;
-            if (r.locks.count (schema::sectionOf (entry.first)) > 0)
-                continue;
-
-            int total = 0;
-            for (const auto& choice : entry.second)
-                total += choice.second;
-            if (total <= 0)
-                continue;
-
-            auto pick = std::uniform_int_distribution<int> (0, total - 1) (rng);
-            for (const auto& choice : entry.second)
-            {
-                pick -= choice.second;
-                if (pick < 0)
-                {
-                    settings[entry.first] = choice.first;
-                    break;
-                }
-            }
-        }
-    }
-
-    namespace
-    {
-        /*  How long a note should ring, per style.
-
-            This is the one place where a musical judgement overrides the
-            corpus rather than following it. A bass preset usually shows a full
-            sustain because the player is the one making the notes short, so
-            reading the library literally gives a bass that drones when you hold
-            a key. What a bass should do when you audition it is fall away, and
-            the same reasoning runs the other way for a lead.
-
-            Values run -1 for short to +1 for long, and they bias where in the
-            style's own distribution each envelope stage is drawn from, so the
-            numbers stay ones real presets use.
-        */
-        struct NoteShape
-        {
-            float attack, decay, sustain, release;
-            /*  A hard ceiling on sustain, because skewing alone is not enough
-                where the distribution is top heavy.
-
-                Bass sustain in the library runs p10 0.29 and median 1.00, so
-                everything from the halfway mark upward is a full sustain. Even
-                a hard skew leaves roughly a third of draws sitting at the top,
-                and a bass that holds the note forever is the thing being
-                complained about. Where a style is meant to be short, it gets a
-                lid as well as a lean.
-            */
-            float sustainCeiling;
-
-            /*  A band for the release, because short is not the same as cut off.
-
-                A bass wants the note to stop when you lift the key, but not
-                instantly: no release at all is a click and reads as a fault
-                rather than a tight sound. A floor keeps a tail on it and a
-                ceiling stops it ringing into the next note. Zero means leave it
-                alone.
-            */
-            float releaseFloor, releaseCeiling;
-
-            /*  A band for the decay, which is where the length of a struck note
-                actually comes from.
-
-                Sustain says whether a note keeps going. Decay says how long it
-                takes to get there, and that is the part a listener hears as the
-                body of the note. Measured against a held note, a decay of 1.00
-                is gone in half a second and 1.25 lasts about one and a tenth,
-                while the library's basses sit at 0.85 to 1.12 and so arrive
-                clipped short. Leaning on the release instead is the wrong shape:
-                that only stretches what happens after the key comes up.
-            */
-            float decayFloor, decayCeiling;
-        };
-
-        NoteShape noteShapeFor (const std::string& style)
-        {
-            //                        attack  decay  sustain release susCeil relLo relHi  decLo decHi
-            if (style == "Bass")       return { -0.5f, +0.3f, -1.0f, -0.4f, 0.0f,  0.15f, 0.45f, 1.08f, 1.30f };
-            if (style == "Percussion") return { -0.8f, -0.2f, -1.0f, -0.5f, 0.0f,  0.10f, 0.35f, 0.88f, 1.12f };
-            if (style == "Keys")       return { -0.4f, +0.1f, -0.6f, -0.2f, 0.55f, 0.20f, 0.0f,  1.00f, 1.28f };
-            if (style == "Lead")       return { -0.1f, +0.2f, +0.4f, +0.3f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            if (style == "Pad")        return { +0.7f, +0.5f, +0.7f, +0.6f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            return { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-        }
-    }
-
-    void Generator::applyNoteShape (const model::Style& style, const Request& r,
-                                    nlohmann::json& settings, std::mt19937& rng)
-    {
-        if (r.locks.count (schema::Section::env) > 0)
-            return;
-
-        const auto shape = noteShapeFor (r.style);
-        const std::pair<const char*, float> stages[] = {
-            { "env_1_attack",  shape.attack },
-            { "env_1_decay",   shape.decay },
-            { "env_1_sustain", shape.sustain },
-            { "env_1_release", shape.release },
-        };
-
-        for (const auto& stage : stages)
-        {
-            if (std::abs (stage.second) < 1.0e-6f)
-                continue;
-            const auto curve = style.continuous.find (stage.first);
-            if (curve == style.continuous.end())
-                continue;
-            settings[stage.first] = style.sample (curve->second,
-                                                  skew (uniform (rng), stage.second));
-        }
-
-        if (shape.sustainCeiling < 1.0f && settings.contains ("env_1_sustain"))
-        {
-            // A struck sound gets no sustain at all, not merely a small one.
-            // Even a sixth of the peak held forever is a note that never stops.
-            const auto sustain = settings["env_1_sustain"].get<float>();
-            if (sustain > shape.sustainCeiling)
-                settings["env_1_sustain"] = shape.sustainCeiling * uniform (rng);
-        }
-
-        /*  The body of the note is set here rather than left to the corpus,
-            because the range real presets use is narrower than what the style
-            wants. Bass lands around 0.7 to 1.2 seconds of decay: long enough to
-            be a note rather than a click, and gone well before the key is.
-        */
-        if (shape.decayFloor > 0.0f && settings.contains ("env_1_decay"))
-            settings["env_1_decay"] = shape.decayFloor
-                                          + uniform (rng) * (shape.decayCeiling - shape.decayFloor);
-
-        if (settings.contains ("env_1_release"))
-        {
-            const auto release = settings["env_1_release"].get<float>();
-            if (shape.releaseFloor > 0.0f && release < shape.releaseFloor)
-                settings["env_1_release"] = shape.releaseFloor
-                                                + uniform (rng) * shape.releaseFloor;
-            else if (shape.releaseCeiling > 0.0f && release > shape.releaseCeiling)
-                settings["env_1_release"] = shape.releaseCeiling * (0.6f + 0.4f * uniform (rng));
-        }
-
-        /*  The instrument's own pitch stays where the keyboard put it.
-
-            Presets in the library do transpose down, a bass sitting at -24 in a
-            third of them, but that is a choice made alongside the notes the
-            author was writing. Someone playing a bass part is already reaching
-            for the bottom two octaves, and a patch that drops another two on top
-            of that lands under the speaker rather than in the track.
-        */
-        if (settings.contains ("osc_1_transpose")
-            && r.locks.count (schema::Section::osc) == 0)
-        {
-            // A bass or a drum has a register, and moving one up an octave puts
-            // it somewhere it does not belong. Only the styles that live in the
-            // middle get to go either way.
-            const auto lowRegister = r.style == "Bass" || r.style == "Percussion";
-            const auto roll = uniform (rng);
-            if (roll < 0.86f)
-                settings["osc_1_transpose"] = 0.0;
-            else
-                settings["osc_1_transpose"] = lowRegister ? -12.0
-                                                          : (roll < 0.95f ? -12.0 : 12.0);
-        }
-    }
-
     void Generator::constrainPitch (const Request& r, nlohmann::json& settings,
                                     std::mt19937& rng)
     {
         /*  Keep the note on the note.
 
-            A player pressing C expects to hear a C. This runs over the finished
-            modulation matrix rather than over the routings this generator adds,
-            because most of them arrive with the spliced donor and were sailing
-            straight past a check that only looked at new ones. That is how a
-            lead ended up with a full depth LFO on its tune, which is a fine
-            sound effect and not a lead.
-
-            Small depths are vibrato and stay. A sequence is the exception, since
-            stepping between pitches is the entire idea, and there the steps get
-            snapped to semitones and squared off instead of gliding.
+            A player pressing C expects to hear a C. Small depths are vibrato
+            and stay. A sequence is the exception, since stepping between
+            pitches is the entire idea, and there the steps are snapped to
+            semitones and squared off instead of gliding.
         */
         if (! settings.contains ("modulations") || ! settings["modulations"].is_array())
             return;
@@ -832,92 +736,53 @@ namespace gen
                 settings[key] = amount < 0.0f ? -cap : cap;
         }
 
-        if (pitchDrivers.empty())
+        if (pitchDrivers.empty() || ! sequenced)
             return;
 
-        if (sequenced)
+        // All twelve semitones, so a swept transpose lands on notes.
+        for (const auto& osc : { "osc_1", "osc_2", "osc_3", "sample" })
         {
-            // All twelve semitones, so a swept transpose lands on notes.
-            for (const auto& osc : { "osc_1", "osc_2", "osc_3", "sample" })
-            {
-                const auto key = std::string (osc) + "_transpose_quantize";
-                if (settings.contains (key))
-                    settings[key] = 4095;
-            }
+            const auto key = std::string (osc) + "_transpose_quantize";
+            if (settings.contains (key))
+                settings[key] = 4095;
+        }
 
-            if (settings.contains ("lfos") && settings["lfos"].is_array())
+        if (settings.contains ("lfos") && settings["lfos"].is_array())
+        {
+            auto& lfos = settings["lfos"];
+            for (const auto& source : pitchDrivers)
             {
-                auto& lfos = settings["lfos"];
-                for (const auto& source : pitchDrivers)
-                {
-                    if (source.rfind ("lfo_", 0) != 0)
-                        continue;
-                    const auto index = std::atoi (source.c_str() + 4) - 1;
-                    if (index >= 0 && index < (int) lfos.size())
-                        lfos[(size_t) index] = wavetable::createStepShape (rng);
-                }
+                if (source.rfind ("lfo_", 0) != 0)
+                    continue;
+                const auto index = std::atoi (source.c_str() + 4) - 1;
+                if (index >= 0 && index < (int) lfos.size())
+                    lfos[(size_t) index] = wavetable::createStepShape (rng);
             }
         }
     }
 
-    void Generator::applyStyleEssentials (const model::Style& style, const Request& r,
-                                          nlohmann::json& settings, std::mt19937& rng)
-    {
-        /*  Which effects are on, which filter circuit, which distortion type.
+    // --------------------------------------------------------------- repair ---
 
-            These drifted with whatever donor turned up, and the library is clear
-            that they are not incidental: bass runs distortion in three quarters
-            of presets and reverb in under half, while a pad is reverb in almost
-            all of them. Applied here rather than at the end so that pushing
-            SPACE or DIRT can still overrule the style.
-        */
-        applyChoices (style.early, r, settings, rng);
-    }
-
-    void Generator::applyIdentity (const model::Style& style, const Request& r,
-                                   nlohmann::json& settings, std::mt19937& rng)
-    {
-        /*  Put the structural parameters back where the style keeps them.
-
-            These drift during splicing and jitter like everything else, but
-            unlike a cutoff they decide what instrument the patch is. Leads were
-            coming out monophonic and pads were losing their unison entirely,
-            which does not read as a variation on the style, it reads as the
-            wrong sound. Each one is drawn from the distribution the style
-            actually uses rather than pinned to its median, so a second
-            oscillator sitting a fifth up is still on the table.
-        */
-        applyChoices (style.identity, r, settings, rng);
-    }
-
-    std::vector<std::string> Generator::repair (const model::Style& style,
-                                                nlohmann::json& settings)
+    std::vector<std::string> Generator::repair (nlohmann::json& settings)
     {
         std::vector<std::string> notes;
 
-        /*  Start from a neutral master volume. The donor's own volume arrives
-            with the skeleton and is often near the top of the range, which
-            leaves nothing to turn up with when the patch turns out quiet. From
-            the default there is room in both directions.
-        */
-        settings["volume"] = loudness::kVolumeDefault;
-
+        // Nothing may sit outside the range it is allowed to be in.
         for (auto it = settings.begin(); it != settings.end(); ++it)
         {
             if (! it.value().is_number())
                 continue;
-            const auto c = style.continuous.find (it.key());
-            if (c == style.continuous.end())
+            float low = 0.0f, high = 0.0f;
+            if (! archetype::rangeFor (it.key(), low, high))
                 continue;
             const auto v = it.value().get<float>();
-            const auto lo = c->second.front(), hi = c->second.back();
-            if (v < lo || v > hi)
-                it.value() = std::max (lo, std::min (hi, v));
+            if (v < low || v > high)
+                it.value() = juce::jlimit (low, high, v);
         }
 
         /*  An oscillator switched on at zero level is not a quiet oscillator,
-            it is a switch left in the wrong position, and it shows up in Vital's
-            interface as an active oscillator making no sound.
+            it is a switch left in the wrong position, and Vital shows it as an
+            active oscillator making no sound.
         */
         for (int i = 1; i <= 3; ++i)
         {
@@ -930,14 +795,7 @@ namespace gen
             }
         }
 
-        /*  A pitched instrument needs a pitched source.
-
-            Checking only that something was audible let a patch through whose
-            single audible source was the noise sample, which is a noise sweep
-            rather than a bass no matter what else is set. Across the library
-            almost every preset in these styles has at least one oscillator
-            running, and noise sits underneath as a layer.
-        */
+        // A pitched instrument needs a pitched source. Noise alone is a sweep.
         int audibleOscs = 0;
         for (int i = 1; i <= 3; ++i)
             if (settings.value ("osc_" + std::to_string (i) + "_on", 0.0) >= 0.5
@@ -952,33 +810,15 @@ namespace gen
         }
 
         // Noise belongs under the oscillators, not over them.
-        if (settings.value ("sample_on", 0.0) >= 0.5)
+        if (settings.value ("sample_on", 0.0) >= 0.5
+            && settings.value ("sample_level", 0.0) > 0.45)
         {
-            const auto level = settings.value ("sample_level", 0.0);
-            if (level > 0.55)
-            {
-                settings["sample_level"] = 0.38;    // the library's median
-                notes.push_back ("noise was louder than the oscillators, brought down");
-            }
+            settings["sample_level"] = 0.3;
+            notes.push_back ("noise was louder than the oscillators, brought down");
         }
 
-        // A zero sustain paired with an instant decay produces a click and
-        // nothing else, which reads as a broken patch rather than a short one.
-        if (settings.value ("env_1_sustain", 1.0) < 0.02
-            && settings.value ("env_1_decay", 1.0) < 0.05)
-        {
-            settings["env_1_decay"] = 0.35;
-            notes.push_back ("amp envelope was inaudible, lengthened decay");
-        }
-        if (settings.value ("env_1_release", 0.0) < 0.01)
-            settings["env_1_release"] = 0.15;
-
-        /*  Keep the patch centred.
-
-            Hand-made presets leave the oscillator pans at zero 96 to 99 percent
-            of the time, and every one of them runs stereo spread at full. A
-            randomised pan does not read as width, it reads as a patch with a
-            broken channel, which is exactly what it sounded like.
+        /*  Keep the patch centred. A randomised pan does not read as width, it
+            reads as a broken channel.
         */
         for (const auto& panKey : { "osc_1_pan", "osc_2_pan", "osc_3_pan", "sample_pan" })
             if (settings.contains (panKey))
@@ -989,6 +829,17 @@ namespace gen
             if (settings.contains (spread) && settings[spread].get<double>() < 0.6)
                 settings[spread] = 1.0;
         }
+
+        // A zero sustain paired with an instant decay is a click and nothing
+        // else, which reads as a broken patch rather than a short one.
+        if (settings.value ("env_1_sustain", 1.0) < 0.02
+            && settings.value ("env_1_decay", 1.0) < 0.05)
+        {
+            settings["env_1_decay"] = 0.35;
+            notes.push_back ("amp envelope was inaudible, lengthened decay");
+        }
+        if (settings.value ("env_1_release", 0.0) < 0.01)
+            settings["env_1_release"] = 0.15;
 
         // Self-oscillation at a very low cutoff is a screech, not a bass patch.
         for (int i = 1; i <= 2; ++i)
@@ -1001,22 +852,29 @@ namespace gen
                 notes.push_back ("tamed filter " + std::to_string (i) + " self-oscillation");
             }
         }
+
+        // Level matching moves this afterwards, so it starts from the middle
+        // with room in both directions.
+        settings["volume"] = loudness::kVolumeDefault;
         return notes;
     }
+
+    // ----------------------------------------------------------------- roll ---
 
     Result Generator::roll (const Request& request)
     {
         Result result;
 
-        const auto* style = styleModel.style (request.style);
+        if (! isReady())
+        {
+            result.error = "the init patch has not been read from Vital yet";
+            return result;
+        }
+
+        const auto* style = archetype::find (request.style);
         if (style == nullptr)
         {
             result.error = "unknown style: " + request.style;
-            return result;
-        }
-        if (style->donors.empty())
-        {
-            result.error = "style has no donor presets: " + request.style;
             return result;
         }
 
@@ -1025,55 +883,63 @@ namespace gen
             seed = std::random_device {}() | 1u;
         result.seed = seed;
 
-        /*  Structure and values come from separate streams so a seed pins which
-            donors a patch is built from while the sliders stay free to move.
-            Sharing one stream means nudging a slider silently reshuffles the
-            donors and the patch the user was working on disappears.
+        /*  Structure and values come from separate streams so a seed pins the
+            shape of a patch while the sliders stay free to move. Sharing one
+            stream means nudging a slider silently reshuffles everything and the
+            patch the user was working on disappears.
         */
         std::mt19937 srng (seed);
         std::mt19937 prng (seed ^ 0x9E3779B9u);
 
-        if (request.base != nullptr)
+        /*  One batch at one slider setting should still hold a sparse patch and
+            a busy one. A real library varies because different people made the
+            presets in it, so each roll wobbles around the setting instead of
+            sitting exactly on it. Squaring the offset keeps most rolls near
+            where the slider was put and lets the occasional one go a long way.
+        */
+        Request adjusted = request;
         {
-            result.preset = *request.base;
+            const auto asked = request.sliders.count ("complexity") > 0
+                                   ? request.sliders.at ("complexity") : 0.5f;
+            std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+            const auto off = u (srng);
+            adjusted.sliders["complexity"] = juce::jlimit (0.0f, 1.0f,
+                asked + off * std::abs (off) * 0.38f * request.complexityWobble);
         }
-        else
-        {
-            const auto* d = pickDonor (*style, srng);
-            if (d == nullptr)
-            {
-                result.error = "could not read any donor preset";
-                return result;
-            }
-            result.preset = *d;
-        }
+        const Request& r = adjusted;
+
+        // VARY keeps the patch it started from. A fresh roll starts from init
+        // with the archetype over it.
+        result.preset = r.base != nullptr ? *r.base : initPreset;
 
         if (! result.preset.contains ("settings") || ! result.preset["settings"].is_object())
         {
-            result.error = "donor preset had no settings block";
+            result.error = "the starting patch had no settings block";
             return result;
         }
 
-        splice (*style, request, result.preset, srng);
         auto& settings = result.preset["settings"];
 
-        synthesiseContent (request, settings, srng);
-        applyStyleEssentials (*style, request, settings, srng);
-        applyAxes (*style, request, settings, prng);
-        // Macros are wired first so their slots are already claimed. Movement
-        // fills what is left, and a heavily wired patch cannot crowd out the
-        // four knobs the player is meant to reach for.
-        wireMacros (*style, request, result.preset, settings, result);
-        if (request.locks.count (schema::Section::lfo) == 0
-            && request.locks.count (schema::Section::mod) == 0)
-            wireMovement (*style, request, settings, srng);
-        applyIdentity (*style, request, settings, srng);
-        applyNoteShape (*style, request, settings, prng);
-        constrainPitch (request, settings, srng);
-        result.repairs = repair (*style, settings);
+        if (r.base == nullptr)
+        {
+            for (const auto& slot : { "modulations" })
+                settings.erase (slot);
+            ensureModSlots (settings);
+            applyArchetype (*style, r, settings);
+            applyComplexity (r, settings, srng);
+        }
 
-        result.preset["preset_style"] = request.style;
-        result.preset["preset_name"] = request.name;
+        synthesiseContent (r, settings, srng);
+        applyAxes (r, settings, prng);
+        if (r.base == nullptr)
+            wireRouting (*style, r, settings, srng);
+        wireMacros (r, result.preset, settings, result);
+        applyNoteShape (r, settings, prng);
+        constrainPitch (r, settings, srng);
+        result.repairs = repair (settings);
+
+        result.preset["preset_style"] = r.style;
+        result.preset["preset_name"] = r.name;
         result.preset["author"] = "";
         // Doubles as the marker the host checks to confirm Vital took the patch.
         result.preset["comments"] = "vr:" + std::to_string (seed);

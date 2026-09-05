@@ -27,43 +27,45 @@ Rather than build those wrappers from scratch, the plugin takes the live
 instance's own state as a template and swaps only the JSON body, so the header
 and version always come from the Vital the user actually has installed.
 
-Patches are not built by drawing 450 random numbers, which produces silence or
-noise essentially every time. Each section (oscillators, filter, envelopes,
-LFOs, effects, modulation matrix) is spliced whole from a donor preset in your
-own installed library, keeping the correlations that make a patch sound
-deliberate. The character axes then re-sample their own parameters from the
-distribution that style actually shows, so a slider never produces a value no
-real preset has used.
+A patch is built in layers, each one narrowing what the next can do. Every roll
+starts from the archetype for its style, a designed patch that already sounds
+like that style. The character axes then move the parameters they own inside
+declared ranges, a parameter with no range stays where the archetype put it, and
+the audition decides whether the result is worth hearing.
 
-**Wavetables are synthesised, never borrowed.** A Vital wave keyframe is 2048
-little-endian floats in base64 and every other component in the format is plain
-parameters, so the tables are written from scratch: harmonic spectra built from
-shape families that suit the style, morphing across up to eight keyframes, with
-Vital's own algorithmic modifiers stacked on top. Splicing a donor's table was
-easier and carried the wavetable data of whatever pack the donor came from,
-which is licensed content and not ours to put in a generated patch. The same
-goes for samples, where names like "River" and "Jack Hammer" across a library
-make the point plainly, so a generated patch uses Vital's own noise sample.
+That layering is the whole design. Vital exposes 450 numbers, and the useful
+region of that space is vanishingly small, so each layer's job is to hand the
+next one a smaller and better region to work in.
 
-It helped the sound as much as the licensing. A fixed pool of donor tables meant
-the same handful of timbres kept turning up; synthesising per roll is where the
-variety comes from.
+An archetype is coherent by construction, which is what makes this work: a bass
+is a bass because it was designed as one. That coherence is measurable, and it
+is why the usable rate sits in the high eighties.
 
-**What each style favours is learned, not written down.** Per style the model
-keeps every parameter's value distribution, which modulation routings the style
-uses and how deep it runs them, which effects it switches on, which filter
-circuit, and how it is played. The style's signature routing is placed first, so
-a bass always gets the decaying envelope on its filter that makes it plucky
-while a sequence gets LFOs on pitch and level.
+**Wavetables are synthesised.** A Vital wave keyframe is 2048 little-endian
+floats in base64 and every other component in the format is plain parameters, so
+the tables are written from scratch: harmonic spectra built from shape families
+that suit the style, morphing across up to eight keyframes, with Vital's own
+algorithmic modifiers stacked on top. Samples work the same way, drawing on
+Vital's own noise.
 
-One subtlety worth writing down, because it took a wrong turn first. Envelope
-shape is collected only from presets that actually route that envelope. Across
-all bass presets `env_2`'s sustain is bimodal, 18 at full and 16 at zero, so its
-median of 0.22 describes nothing real and sampling it hands out a sustained
-envelope two times in five. Among the presets that route `env_2` at a filter the
-median is 0.12 and not one of them sustains, because an envelope nobody uses
-just sits at its default. Since the generator always wires this envelope, the
-conditional distribution is the only one that means anything.
+Writing them per roll is where the variety comes from, since the harmonic
+content is fresh every time, and it keeps a generated patch free of licensed
+content and therefore yours to share.
+
+**What each style favours is written down.** Each archetype names the settings
+and routings that make that style what it is, and the style's signature routing
+is placed first, so a bass always gets the decaying envelope on its filter that
+makes it plucky while a sequence gets LFOs on pitch and level.
+
+The numbers came from measuring a real library once, and one lesson from that
+work is worth keeping, because it took a wrong turn first. A statistic has to be
+conditioned on the parameter actually being used. Across all bass presets
+`env_2`'s sustain is bimodal, 18 at full and 16 at zero, so its median of 0.22
+describes nothing real and sampling it hands out a sustained envelope two times
+in five. Among the presets that route `env_2` at a filter the median is 0.12 and
+not one of them sustains, because an envelope nobody uses just sits at its
+default. Only the conditional figure meant anything, and that is the one the
+archetypes were built from.
 
 **A note has to be the note that was pressed.** The audition finds the sounding
 pitch by autocorrelation over the loudest part of the note, and Bass, Keys,
@@ -75,10 +77,10 @@ fundamental vanished and the ear latched onto a high harmonic instead. Effects,
 experiments and percussion are exempt, since being unplaceable is the point
 there.
 
-**Note shape is the one place a musical judgement overrides the library.** A
-bass preset usually shows a full sustain because the player is the one making
-the notes short, so reading the corpus literally gives a bass that drones when
-you hold a key. Each style gets a lean, and the struck ones get hard bands as
+**Note shape is the one place a musical judgement overrides the measurements.**
+A bass preset usually shows a full sustain because the player is the one making
+the notes short, so following that literally gives a bass that drones when you
+hold a key. Each style gets a lean, and the struck ones get hard bands as
 well, because leaning is not enough where the distribution is top heavy: bass
 sustain runs p10 0.29 and median 1.00, so everything above halfway is a full
 sustain.
@@ -86,8 +88,8 @@ sustain.
 The length of a struck note comes from its decay, not its release. Sustain says
 whether a note keeps going, decay says how long it takes to get there, and that
 is what a listener hears as the body. Measured against a held note a decay of
-1.00 is gone in half a second and 1.25 lasts about 1.1, while the library's
-basses sit at 0.85 to 1.12 and so arrive clipped short. Release only stretches
+1.00 is gone in half a second and 1.25 lasts about 1.1, while hand-made basses
+sit at 0.85 to 1.12 and so arrive clipped short. Release only stretches
 what happens after the key comes up, which is a different thing entirely.
 
 None of that is trusted to the parameters, though. Whether a note keeps going is
@@ -96,31 +98,31 @@ still down, because a bass whose sustain is zero still drones if an LFO is
 pushing an oscillator's level back up. One patch doing exactly that measured a
 rising envelope two seconds into a held note.
 
-**Structural identity is put back per style.** A few parameters decide what
-instrument a patch is rather than how it is voiced, and they drift during
-splicing like anything else. A lead that came out monophonic and a pad that lost
-its unison are not variations on the style. Polyphony, unison voices and
-oscillator transpose are drawn from the distribution the style actually uses,
-which keeps intentional spread like a second oscillator sitting a fifth up.
+**Structural identity is fixed per style.** A few parameters decide what
+instrument a patch is rather than how it is voiced, and left to the jitter they
+drift like anything else. A lead that came out monophonic and a pad that lost
+its unison are not variations on the style, so polyphony, unison voices and
+oscillator transpose are set by the archetype rather than rolled.
 
 Every generated patch gets its four macros wired and named. Macros are the most
-used modulation source in a real preset library, ahead of the LFOs, and they are
-the only part of a patch you can automate from the host.
+used modulation source in hand-made presets, ahead of the LFOs, and they are the
+only part of a patch you can automate from the host.
 
 ## Using it
 
-Drop **Vital Randomizer** on a MIDI track. On first run it finds Vital, reads
-your preset library and learns from it, which takes a few seconds and is cached
-afterwards. Then:
+Drop **Vital Randomizer** on a MIDI track. It finds Vital on its own, and a
+fresh install is all it needs. Then:
 
-- **ROLL** makes a fresh patch from the style and the four character sliders.
+- **ROLL** makes a fresh patch from the style and the sliders.
 - **VARY** drifts the current patch instead of replacing it, with the small
   slider beside it setting how far. This is where usable patches actually come
   from.
+- **BRIGHT / MOVE / DIRT / SPACE** set the character, and **COMPLEX** sets how
+  much of the synth a patch may use.
 - **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
 - **< >** walk the candidate history, **KEEP** stars one so rolling cannot lose
   it, **EXPORT** writes a `.vital` file.
-- **...** locates Vital or rescans your library if either moved.
+- **...** locates Vital if it moved.
 
 Everything saves with the DAW project, including the patch that was playing and
 your starred keepers.
@@ -154,9 +156,9 @@ Targets:
 | `vrscan` | loads a VST3 the way a DAW does and plays a note through it |
 
 `vrtest` also takes `--save=<dir>` to write a batch out for listening,
-`--corpus=N` to measure hand-made presets from your library with the same code
-the plugin uses (which is where the loudness targets come from), and
-`--diag=<file>` to measure one patch repeatedly.
+`--complexity=<0..1>` to hold every roll at one setting or `--complexity=ramp`
+to walk the whole range across each style's presets, and `--diag=<file>` to
+measure one patch repeatedly.
 
 ## Where it stands
 
@@ -186,7 +188,8 @@ and Sequence at neutral slider settings, with macros wired on every one.
 Generated patches differ from each other slightly more than hand-written ones
 do, which is the point: unique without being random.
 
-**What each style is made of**, as learned from a 299 preset library:
+**What each style is made of.** Measured once across 299 hand-made presets,
+which is where the archetypes started rather than anything read at run time:
 
 | | signature routing | `env_2` sustain | mod depth | poly | transpose | unison | attack |
 |---|---|---|---|---|---|---|---|
@@ -197,12 +200,12 @@ do, which is the point: unique without being random.
 | Sequence | `lfo_1 -> osc_1_level` | 1.00 | 0.39 | 8 | 0 | 2 | 0.15 |
 | Percussion | `velocity -> osc_1_level` | - | 0.23 | 6 | 0 | 3 | 0.15 |
 
-Effect usage is learned the same way, and it is not incidental: bass runs
+Effect usage came from the same pass, and it is not incidental: bass runs
 distortion in 73% of presets but reverb in 41%, while a pad is reverb in 97% and
 chorus in 79%. So is how a style is played, with 39% of basses using legato
 against 2% of pads.
 
-**Style fidelity**, corpus against generated:
+**Style fidelity**, hand-made against generated:
 
 | | `env_2` sustain | filter envelope wired | polyphony |
 |---|---|---|---|
@@ -222,17 +225,17 @@ measurement code:
 | channel balance | patches audible on one side only | within about 2 dB |
 
 The routing count is the other half of why early patches sounded like noise. A
-spliced donor can arrive with nothing wired but its macros, and four macros
+patch can easily end up with nothing wired but its macros, and four macros
 sitting at their default position do not move at all, so the patch is static.
-Movement now scales around what presets in that style actually use, which the
-style model learns per style, instead of starting from zero.
+Each archetype now names the routings its style depends on, and MOVE and COMPLEX
+add more on top, instead of starting from zero.
 
-**Style defaults.** Picking a style sets the four sliders to settings tuned for
-it. All four at the middle is the least characterful thing the generator can
+**Style defaults.** Picking a style sets the sliders to settings tuned for it.
+Everything at the middle is the least characterful thing the generator can
 produce, because nothing is being asked of it.
 
-**Axes**, tested by building the same patch from the same donors twice, once
-with the slider low and once high, so donor variance cancels out:
+**Axes**, tested by building the same patch from the same seed twice, once with
+the slider low and once high, so everything but the slider cancels out:
 
 | axis | agreement | |
 |---|---|---|
@@ -303,8 +306,7 @@ catches those at their quietest.
 
 **Threading.** Vital is created on the message thread, because instantiating a
 VST3 on Windows needs COM initialised on the calling thread and a bare worker
-thread does not have it. Reading the preset library and generating patches
-happen on a worker. The audio thread takes a try-lock, never a lock: a patch
+thread does not have it. Generating and auditioning patches happen on a worker. The audio thread takes a try-lock, never a lock: a patch
 load holds it for a couple of hundred milliseconds, and going quiet for a moment
 beats stalling the whole DAW.
 
@@ -339,6 +341,69 @@ its chain does not respond to master volume the same way.
 The level is written into the patch's own master volume rather than trimmed in
 the plugin's output, so it travels with the preset when you export it.
 
+## How much of the synth a patch uses
+
+The complaint was that patches sounded boring, and the guess was that they
+authored too few parameters. Measuring said otherwise. Against a hand-made
+library:
+
+| | median | range |
+|---|---|---|
+| authored parameters, generated | 96 | 89-111 |
+| authored parameters, hand-made | 75 | 5-231 |
+| routings, generated | 10 | 7-14 |
+| routings, hand-made | 9 | 0-64 |
+
+The generator was authoring *more* than a person does. What it never did was
+vary. Every roll used about the same amount of Vital, and a batch of patches
+that are all equally busy reads as one patch heard eight times. Filter 2 made
+the point: on in 42% of hand-made presets, and in 0 of 48 generated ones.
+
+COMPLEX decides how much of the synth is in play. It switches the third
+oscillator, the noise layer, the second filter and the modulation effects on and
+off, and it scales both the jitter and the number of extra routings. Each style
+starts where that style usually sits, from 0.40 for percussion to 0.90 for
+experiment, and every roll wobbles around its setting by a squared offset so
+most land near it and the occasional one goes a long way.
+
+Two things had to be held back. Noise is flat all the way up, so even a little
+of it drags a patch toward its brightness ceiling, and a phaser or flanger rings
+on after the key is released. Both are excluded for bass and percussion, which
+have to stop dead.
+
+## What the third oscillator is allowed to be
+
+It is a layer, not a harmony part. It sits at unison about 40% of the time and
+earns its place through its own wavetable, voice count and detune, and otherwise
+moves an octave. Bass gets unison or a sub, never the octave up.
+
+Fixed intervals are the thing it will not roll, and the reason is musical before
+it is technical. A patch that adds a fifth to every note is choosing harmony on
+the player's behalf, and a major third stack is plainly wrong over half of what
+somebody plays. The octave also happens to be the only exact interval: an equal
+tempered fifth is 1.4983 rather than 1.5, so root and fifth never share a period
+and the sound has no single pitch to hear. With a fifth allowed, sequences came
+out 4.77 semitones off the key that was pressed.
+
+Vital has its own name for the idea in the unison stack styles. The indices were
+measured by rendering middle C through each one with detune off and reading the
+partials back, rather than assumed from the enum:
+
+| index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| | unison | drop 12 | drop 24 | octave | 2x oct | power | 2x power | major | minor | harm | odd harm |
+
+Five through eight add a real fifth or third. Pitched styles get the octave pair
+and a bass gets the drop. SFX and Experiment have no pitch rule, because they are
+sounds rather than notes, so there any of the eleven is fair game.
+
+After all of it, at the per-style defaults:
+
+```
+params med 107 (84-130)   routings med 12 (7-23)   filter 2 on in 31 of 48
+84% of candidates usable
+```
+
 ## Checking it from outside
 
 `tools/measure.py` loads Vital independently and measures the `.vital` files on
@@ -356,7 +421,6 @@ cd tools
 python measure.py level      ../out
 python measure.py pitch      ../out
 python measure.py held       ../out/Bass_01.vital
-python measure.py provenance ../out
 ```
 
 ## Licensing
@@ -366,6 +430,6 @@ exactly as a DAW does rather than linking or modifying it. Vital is not bundled;
 the plugin finds the copy you have installed. JUCE and the VST3 SDK are both
 GPLv3-or-commercial, so this is released under GPLv3.
 
-The style model is built from your own preset library and stays on your machine.
-Patches spliced from commercial packs carry those packs' wavetables, which is
-fine for your own use and not something to redistribute.
+A generated patch is original work: the wavetables are synthesised per roll and
+the parameters come from the designed starting points in this repository, so what
+it produces is yours to do what you like with.

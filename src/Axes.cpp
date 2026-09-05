@@ -24,7 +24,7 @@ namespace axes
                 w ("^osc_\\d_wave_frame$", 0.5f),
                 w ("^filter_\\d_keytrack$", 0.3f),
                 // Filter cutoff is the obvious brightness control and also the
-                // most modulated destination in the corpus, so biasing it
+                // most modulated destination in hand-made presets, so biasing it
                 // statically gets overridden by whatever envelope is already
                 // driving it. The EQ is the one tone control nothing else is
                 // fighting over, which makes it the axis's most reliable lever.

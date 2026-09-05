@@ -6,7 +6,7 @@
 /*
     Parameter classification for Vital's settings block.
 
-    Sections are the unit the randomizer splices and locks. Each one owns a set
+    Sections are the unit the randomizer rolls and locks. Each one owns a set
     of numeric parameters and, for some, a structural blob that has to travel
     with it: oscillators own their wavetables and the sample, the LFO section
     owns its shapes. Splitting those apart produces patches whose oscillator
@@ -27,7 +27,7 @@ namespace schema
         settings, and anything that makes the patch unusable if it moves. */
     bool isExcluded (const std::string& param);
 
-    /** Genuinely indexed parameters. Counting distinct values in the corpus
+    /** Genuinely indexed parameters. Counting distinct values across hand-made presets
         cannot tell these apart from parameters that simply sit at their default
         in most presets, so they are matched by name instead. */
     bool isIndexed (const std::string& param);

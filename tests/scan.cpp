@@ -70,9 +70,9 @@ int main (int argc, char** argv)
               << " acceptsMidi=" << (instance->acceptsMidi() ? "yes" : "no")
               << " hasEditor=" << (instance->hasEditor() ? "yes" : "no") << "\n";
 
-    // The plugin loads Vital and reads the preset library on a worker thread,
-    // so it needs a moment before it can make a sound. Pumping the message loop
-    // rather than sleeping keeps that work able to finish.
+    // The plugin loads Vital on the message thread a moment after it is
+    // constructed, so it needs time before it can make a sound. Pumping the
+    // message loop rather than sleeping is what lets that work finish.
     std::cout << "letting it start up for " << settleSeconds << "s\n";
     const auto until = juce::Time::getMillisecondCounter() + (juce::uint32) settleSeconds * 1000;
     while (juce::Time::getMillisecondCounter() < until)

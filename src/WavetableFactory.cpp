@@ -235,11 +235,22 @@ namespace wavetable
             single frame is kept in the mix on purpose: some sounds want to sit
             still.
         */
-        const auto frames = request.move > 0.5f ? pick (rng, 3, 8) : pick (rng, 1, 4);
+        const auto ceiling = juce::jlimit (1, 8, juce::roundToInt (
+            juce::jmap (request.complexity, 0.0f, 1.0f, 2.0f, 8.0f)));
+        const auto frames = request.move > 0.5f ? pick (rng, juce::jmin (3, ceiling), ceiling)
+                                                : pick (rng, 1, juce::jmax (1, ceiling / 2));
 
         // How far the spectrum drifts from one end of the table to the other.
         const auto drift = juce::jmap (request.move, 0.0f, 1.0f, 0.15f, 1.0f);
-        const auto endRolloff = spectrum.rolloff * juce::jmap (uniform (rng), 0.45f, 1.7f);
+        /*  How far the timbre drifts across the table.
+
+            This used to reach 0.45 of the starting rolloff, which meant the far
+            end of a table could be far brighter than the BRIGHT slider ever
+            asked for. Sweeping the wave frame then walked straight past the
+            brightness the style wanted, and basses were being rejected for it.
+            Morphing still happens, it just cannot outrun the setting.
+        */
+        const auto endRolloff = spectrum.rolloff * juce::jmap (uniform (rng), 0.78f, 1.5f);
         const auto endDuty = uniform (rng, 0.05f, 0.5f);
 
         nlohmann::json keyframes = nlohmann::json::array();
@@ -275,7 +286,7 @@ namespace wavetable
             arr.push_back (std::move (kf));
             components.push_back (makeComponent ("Wave Folder", std::move (arr)));
         }
-        else if (uniform (rng) < 0.30f)
+        else if (uniform (rng) < 0.15f + request.complexity * 0.45f)
         {
             nlohmann::json a, b;
             a["position"] = 0;

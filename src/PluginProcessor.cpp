@@ -3,15 +3,19 @@
 #include "PluginEditor.h"
 #include "Axes.h"
 
+#include <algorithm>
+
 VitalRandomizerProcessor::VitalRandomizerProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       Thread ("VitalRandomizer worker")
 {
     for (const auto& axis : axes::all())
         sliders[juce::String (axis.key)] = 0.5f;
+    // Not an axis. The four axes shape the tone, this one decides how much of
+    // the synth the patch uses at all.
+    sliders["complexity"] = 0.5f;
 
     applyStyleDefaults (currentStyle);
-    currentLibrary = model::StyleModel::defaultLibraryRoot();
     vitalPath = VitalHost::findInstalled();
 
     /*  Vital is loaded a moment later, not here.
@@ -71,8 +75,25 @@ void VitalRandomizerProcessor::loadVitalNow()
     juce::String previewError;
     preview.load (vitalPath, 44100.0, 512, previewError);
 
-    setStatus ("Reading your preset library", -1.0f, true);
-    enqueue (Job::buildModel);
+    /*  Every patch is built on top of Vital's own init state, so the generator
+        needs it before it can do anything. Reading it from the instance rather
+        than shipping a copy means it always matches the Vital installed here.
+    */
+    generator = std::make_unique<gen::Generator>();
+    auto init = host.currentPreset();
+    if (! init.is_null() && init.contains ("settings"))
+    {
+        init.erase ("tuning");
+        generator->setInitPreset (std::move (init));
+    }
+
+    const auto names = gen::Generator::styles();
+    if (! names.empty()
+        && std::find (names.begin(), names.end(), currentStyle.toStdString()) == names.end())
+        setStyle (juce::String (names.front()));
+
+    setStatus (generator->isReady() ? "Ready" : "Could not read Vital's init patch",
+               -1.0f, false);
     sendChangeMessage();
 }
 
@@ -166,7 +187,6 @@ void VitalRandomizerProcessor::run()
 
         switch (job)
         {
-            case Job::buildModel:      buildModelNow();  break;
             case Job::rollNew:
             case Job::vary:
             case Job::recall:
@@ -174,57 +194,6 @@ void VitalRandomizerProcessor::run()
             default: break;
         }
     }
-}
-
-void VitalRandomizerProcessor::buildModelNow()
-{
-    if (! host.isLoaded())
-    {
-        // Creating the hosted plugin has to happen on the message thread, so it
-        // is done in the constructor and by locateVital, never here.
-        setStatus ("Vital not loaded", -1.0f, false);
-        sendChangeMessage();
-        return;
-    }
-
-    const auto cache = model::StyleModel::defaultCacheFile();
-    bool loaded = styleModel.loadFromFile (cache);
-
-    if (! loaded)
-    {
-        setStatus ("Reading your Vital library", 0.0f, true);
-        const auto n = styleModel.buildFromLibrary (currentLibrary,
-            [this] (float p) { setStatus ("Reading your Vital library", p, true); sendChangeMessage(); });
-
-        if (n == 0)
-        {
-            errorText = "No .vital presets found under " + currentLibrary.getFullPathName();
-            setStatus ("No presets found", -1.0f, false);
-            sendChangeMessage();
-            return;
-        }
-        styleModel.saveToFile (cache);
-        loaded = true;
-    }
-
-    generator = std::make_unique<gen::Generator> (styleModel);
-
-    // Vital's own noise sample, read straight out of a fresh instance. Donor
-    // presets carry whatever their pack author recorded, which is not ours to
-    // put into a generated patch.
-    const auto init = host.currentPreset();
-    if (! init.is_null() && init.contains ("settings")
-        && init["settings"].contains ("sample"))
-        generator->setDefaultSample (init["settings"]["sample"]);
-
-    const auto names = styleModel.styleNames();
-    if (! names.empty()
-        && styleModel.style (currentStyle.toStdString()) == nullptr)
-        currentStyle = juce::String (names.front());
-
-    setStatus ("Ready, " + juce::String (styleModel.presetCount()) + " presets learned",
-               -1.0f, false);
-    sendChangeMessage();
 }
 
 gen::Request VitalRandomizerProcessor::buildRequest() const
@@ -381,7 +350,7 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
 
         // A patch can be perfectly healthy and still be the wrong instrument.
         const auto styleName = currentStyle.toStdString();
-        const auto bounds = audition::brightnessFor (styleName);
+        const auto bounds = audition::brightnessFor (styleName, slider ("complexity"));
         if (measured.centroidHz > 0.0f
             && (measured.centroidHz < bounds.low || measured.centroidHz > bounds.high))
             return false;
@@ -390,9 +359,11 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
 
         // Give back the note that was pressed, or roll again.
         const auto pitch = audition::pitchRuleFor (styleName);
+        const auto pitchError = pitch.octavesOnly ? measured.pitchErrorSemitones
+                                                  : measured.pitchOffGridSemitones;
         if (pitch.required
             && (measured.pitchSalience < pitch.minSalience
-                || measured.pitchErrorSemitones > pitch.maxErrorSemitones))
+                || pitchError > pitch.maxErrorSemitones))
             return false;
 
         auto wanted = loudness::correctionDb (measured.rms, measured.peak);
@@ -538,53 +509,15 @@ void VitalRandomizerProcessor::recallKeeper (size_t index)
     enqueue (Job::recall);
 }
 
-namespace
-{
-    /*  Where each style's sliders start.
-
-        Neutral is the wrong default. All four at the middle produces the least
-        characterful patch the generator can make, because nothing is being
-        asked of it, and a bass that sounds like a pad is not a useful starting
-        point. These are the settings the generator was tuned and measured
-        against, so picking a style lands somewhere that already sounds like
-        that style.
-    */
-    struct StyleDefaults { const char* style; float bright, move, dirt, space; };
-
-    const StyleDefaults kStyleDefaults[] = {
-        { "Bass",       0.30f, 0.55f, 0.75f, 0.20f },
-        { "Lead",       0.80f, 0.65f, 0.55f, 0.45f },
-        { "Pad",        0.45f, 0.70f, 0.15f, 0.90f },
-        { "Keys",       0.60f, 0.45f, 0.20f, 0.55f },
-        { "Sequence",   0.65f, 0.85f, 0.45f, 0.40f },
-        { "Percussion", 0.55f, 0.30f, 0.60f, 0.25f },
-        { "SFX",        0.60f, 0.90f, 0.60f, 0.75f },
-        { "Experiment", 0.55f, 0.80f, 0.65f, 0.60f },
-    };
-}
-
 void VitalRandomizerProcessor::applyStyleDefaults (const juce::String& style)
 {
-    for (const auto& d : kStyleDefaults)
-    {
-        if (style.equalsIgnoreCase (d.style))
-        {
-            const juce::ScopedLock sl (settingsLock);
-            sliders["bright"] = d.bright;
-            sliders["move"]   = d.move;
-            sliders["dirt"]   = d.dirt;
-            sliders["space"]  = d.space;
-            return;
-        }
-    }
-
-    // An unlabelled or unknown style gets a mild starting point rather than
-    // dead centre, so it still produces something with movement in it.
+    const auto d = archetype::defaultSlidersFor (style.toStdString());
     const juce::ScopedLock sl (settingsLock);
-    sliders["bright"] = 0.55f;
-    sliders["move"]   = 0.60f;
-    sliders["dirt"]   = 0.45f;
-    sliders["space"]  = 0.55f;
+    sliders["bright"]     = d.bright;
+    sliders["move"]       = d.move;
+    sliders["dirt"]       = d.dirt;
+    sliders["space"]      = d.space;
+    sliders["complexity"] = d.complexity;
 }
 
 void VitalRandomizerProcessor::setStyle (const juce::String& s)
@@ -645,22 +578,8 @@ void VitalRandomizerProcessor::locateVital (const juce::File& vst3)
     // Called from the editor, so already on the message thread, which is where
     // a VST3 instance has to be created.
     vitalPath = vst3;
-    juce::String error;
-    if (host.load (vitalPath, getSampleRate() > 0 ? getSampleRate() : 44100.0,
-                   getBlockSize() > 0 ? getBlockSize() : 512, error))
-        errorText.clear();
-    else
-        errorText = error;
-
-    enqueue (Job::buildModel);
-    sendChangeMessage();
-}
-
-void VitalRandomizerProcessor::rescanLibrary (const juce::File& root)
-{
-    currentLibrary = root;
-    model::StyleModel::defaultCacheFile().deleteFile();
-    enqueue (Job::buildModel);
+    errorText.clear();
+    loadVitalNow();
 }
 
 void VitalRandomizerProcessor::setStatus (const juce::String& message, float progress,
@@ -671,7 +590,6 @@ void VitalRandomizerProcessor::setStatus (const juce::String& message, float pro
     currentStatus.progress = progress;
     currentStatus.working = working;
     currentStatus.vitalReady = host.isLoaded();
-    currentStatus.modelReady = styleModel.isReady();
 }
 
 VitalRandomizerProcessor::Status VitalRandomizerProcessor::status() const
@@ -679,13 +597,12 @@ VitalRandomizerProcessor::Status VitalRandomizerProcessor::status() const
     const juce::ScopedLock sl (statusLock);
     auto s = currentStatus;
     s.vitalReady = host.isLoaded();
-    s.modelReady = styleModel.isReady();
     return s;
 }
 
 std::vector<std::string> VitalRandomizerProcessor::availableStyles() const
 {
-    return styleModel.styleNames();
+    return gen::Generator::styles();
 }
 
 juce::String VitalRandomizerProcessor::lastMacroSummary() const     { return macroSummary; }
@@ -711,7 +628,6 @@ void VitalRandomizerProcessor::getStateInformation (juce::MemoryBlock& destData)
     j["version"] = 1;
     j["style"] = currentStyle.toStdString();
     j["vary"] = varyDepth.load();
-    j["library"] = currentLibrary.getFullPathName().toStdString();
     j["vital"] = vitalPath.getFullPathName().toStdString();
 
     {
@@ -760,12 +676,6 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
 
     varyDepth = j.value ("vary", 0.25f);
 
-    if (j.contains ("library"))
-    {
-        const juce::File lib (juce::String (j["library"].get<std::string>()));
-        if (lib.isDirectory())
-            currentLibrary = lib;
-    }
     if (j.contains ("vital"))
     {
         const juce::File v (juce::String (j["vital"].get<std::string>()));
@@ -781,8 +691,6 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
         const juce::ScopedLock sl (livePresetLock);
         livePreset = j["preset"];
     }
-
-    enqueue (Job::buildModel);
 }
 
 juce::AudioProcessorEditor* VitalRandomizerProcessor::createEditor()

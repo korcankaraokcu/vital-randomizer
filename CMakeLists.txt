@@ -30,7 +30,7 @@ target_sources(VitalRandomizer PRIVATE
     src/WavetableFactory.cpp
     src/Schema.cpp
     src/Axes.cpp
-    src/StyleModel.cpp
+    src/Archetypes.cpp
     src/Generator.cpp
     src/Loudness.cpp
     src/CandidateStore.cpp)
@@ -92,7 +92,7 @@ target_sources(vrtest PRIVATE
     src/WavetableFactory.cpp
     src/Schema.cpp
     src/Axes.cpp
-    src/StyleModel.cpp
+    src/Archetypes.cpp
     src/Generator.cpp
     src/Loudness.cpp)
 

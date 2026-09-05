@@ -119,13 +119,23 @@ VitalRandomizerEditor::VitalRandomizerEditor (VitalRandomizerProcessor& p)
     };
     addAndMakeVisible (styleBox);
 
+    /*  The four character axes, then COMPLEX. Complexity is not an axis: it
+        does not bias a set of parameters or claim a macro, it decides how much
+        of the synth a patch is allowed to use at all. It sits in the same strip
+        because that is where a player looks for it.
+    */
+    std::vector<std::pair<juce::String, juce::String>> strip;
     for (const auto& axis : axes::all())
+        strip.emplace_back (juce::String (axis.key), juce::String (axis.label));
+    strip.emplace_back ("complexity", "COMPLEX");
+
+    for (const auto& entry : strip)
     {
         AxisControl control;
-        control.key = juce::String (axis.key);
+        control.key = entry.first;
 
         control.label = std::make_unique<juce::Label>();
-        control.label->setText (juce::String (axis.label), juce::dontSendNotification);
+        control.label->setText (entry.second, juce::dontSendNotification);
         control.label->setColour (juce::Label::textColourId, kTextDim);
         control.label->setFont (juce::FontOptions (11.0f));
         addAndMakeVisible (*control.label);
@@ -302,7 +312,7 @@ void VitalRandomizerEditor::refreshFromProcessor()
     macroLabel.setText (macros.isNotEmpty() ? "macros: " + macros : juce::String(),
                         juce::dontSendNotification);
 
-    const auto ready = s.vitalReady && s.modelReady && ! s.working;
+    const auto ready = s.vitalReady && ! s.working;
     rollButton.setEnabled (ready);
     varyButton.setEnabled (ready && ! proc.candidates().empty());
     starButton.setEnabled (ready && ! proc.candidates().empty());
@@ -346,11 +356,9 @@ void VitalRandomizerEditor::showSettingsMenu()
 {
     juce::PopupMenu menu;
     menu.addItem (1, "Locate Vital.vst3");
-    menu.addItem (2, "Rescan preset library");
     menu.addSeparator();
     menu.addItem (3, "Vital: " + (proc.status().vitalReady ? juce::String ("loaded")
                                                            : juce::String ("not loaded")), false);
-    menu.addItem (4, "Library: " + proc.libraryRoot().getFileName(), false);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (settingsButton),
                         [this] (int result)
@@ -367,19 +375,6 @@ void VitalRandomizerEditor::showSettingsMenu()
                 const auto file = fc.getResult();
                 if (file != juce::File())
                     proc.locateVital (file);
-            });
-        }
-        else if (result == 2)
-        {
-            chooser = std::make_unique<juce::FileChooser> ("Which folder holds your presets?",
-                                                           proc.libraryRoot());
-            chooser->launchAsync (juce::FileBrowserComponent::openMode
-                                      | juce::FileBrowserComponent::canSelectDirectories,
-                                  [this] (const juce::FileChooser& fc)
-            {
-                const auto dir = fc.getResult();
-                if (dir.isDirectory())
-                    proc.rescanLibrary (dir);
             });
         }
     });
@@ -434,12 +429,12 @@ void VitalRandomizerEditor::resized()
 
     // Axis sliders share the middle of the top row, one label plus track each.
     const auto axisCount = juce::jmax (1, (int) axisControls.size());
-    auto axisArea = topRow.removeFromLeft (juce::jmax (240, topRow.getWidth() - 300));
+    auto axisArea = topRow.removeFromLeft (juce::jmax (76 * axisCount, topRow.getWidth() - 300));
     const auto axisWidth = axisArea.getWidth() / axisCount;
     for (auto& control : axisControls)
     {
         auto cell = axisArea.removeFromLeft (axisWidth).reduced (4, 0);
-        control.label->setBounds (cell.removeFromLeft (46));
+        control.label->setBounds (cell.removeFromLeft (44));
         control.slider->setBounds (cell);
     }
 

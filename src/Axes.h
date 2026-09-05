@@ -14,10 +14,9 @@
     macro can do on its own, which is why the axes run when a patch is generated
     and the macros are wired afterwards as their playable subset.
 
-    Weights say how hard an axis pulls a parameter. Measured, not guessed: see
-    tools/sweep.py, which builds the same patch from the same donors twice with
-    the slider low and high and reports how often the sound moved the way the
-    axis claims it does.
+    Weights say how hard an axis pulls a parameter, and each one moves its
+    parameters within the ranges declared in Archetypes.h rather than anywhere
+    the parameter technically allows.
 */
 namespace axes
 {
