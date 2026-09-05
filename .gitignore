@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+out/
+deps/JUCE/
+deps/nlohmann/
+build/
