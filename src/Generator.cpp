@@ -171,18 +171,30 @@ namespace gen
             float sustainCeiling;
             float releaseFloor, releaseCeiling;
             float decayFloor, decayCeiling;
+            /*  The hard limit on how slowly a note may start.
+
+                Leaning the attack short was not enough. A bass took up to 1.35
+                seconds to reach full level, which is not a bass whatever else it
+                is, and a note that slow to rise has more energy late in the hold
+                than early, so the held note check flagged it as a drone and
+                mislabelled the fault. Basses that pass sit at 0.12 to 0.13.
+                Zero means the style has no limit.
+            */
+            float attackCeiling;
         };
 
         NoteShape noteShapeFor (const std::string& style)
         {
-            //                        attack  decay  sustain release susCeil relLo relHi  decLo decHi
-            if (style == "Bass")       return { -0.5f, +0.3f, -1.0f, -0.4f, 0.0f,  0.15f, 0.45f, 1.08f, 1.30f };
-            if (style == "Percussion") return { -0.8f, -0.2f, -1.0f, -0.5f, 0.0f,  0.10f, 0.35f, 0.88f, 1.12f };
-            if (style == "Keys")       return { -0.4f, +0.1f, -0.6f, -0.2f, 0.55f, 0.20f, 0.0f,  1.00f, 1.28f };
+            //                        attack  decay  sustain release susCeil relLo relHi  decLo decHi atkHi
+            // The decay ceiling comes down with it. At 1.29 a bass took 2.4s to
+            // fall to a tenth, and the ones that sound right fall in 0.6 to 0.9.
+            if (style == "Bass")       return { -0.5f, +0.3f, -1.0f, -0.4f, 0.0f,  0.15f, 0.45f, 1.08f, 1.20f, 0.16f };
+            if (style == "Percussion") return { -0.8f, -0.2f, -1.0f, -0.5f, 0.0f,  0.10f, 0.35f, 0.88f, 1.12f, 0.10f };
+            if (style == "Keys")       return { -0.4f, +0.1f, -0.6f, -0.2f, 0.55f, 0.20f, 0.0f,  1.00f, 1.28f, 0.35f };
             if (style == "Lead")       return { -0.1f, +0.2f, +0.4f, +0.3f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            if (style == "Pad")        return { +0.7f, +0.5f, +0.7f, +0.6f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            return { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+            if (style == "Pad")        return { +0.7f, +0.5f, +0.7f, +0.6f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f };
+            if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.25f };
+            return { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
         }
 
         /** A value inside the parameter's range, at the given percentile. */
@@ -532,6 +544,20 @@ namespace gen
             float sampled = 0.0f;
             if (sampleInRange (stage.first, skew (uniform (rng), stage.second), sampled))
                 settings[stage.first] = sampled;
+        }
+
+        /*  A struck note starts when the key goes down, not a second later.
+
+            The lean above only shifts the odds. What was coming out the other
+            side was a bass taking over a second to reach full level, which reads
+            as a swell rather than a note being played, and which the held note
+            check then blamed for droning.
+        */
+        if (shape.attackCeiling > 0.0f && settings.contains ("env_1_attack"))
+        {
+            const auto attack = settings["env_1_attack"].get<float>();
+            if (attack > shape.attackCeiling)
+                settings["env_1_attack"] = shape.attackCeiling * (0.3f + 0.7f * uniform (rng));
         }
 
         // A struck sound gets no sustain at all, not merely a small one. Even a

@@ -476,6 +476,50 @@ number is now the height of a real peak instead of the height of the slope. The
 patches did not change. The Sequence threshold moved from 0.40 to 0.20 to match,
 which is under the 0.26 that the worst patch anybody called good measures at.
 
+## Counting what gets thrown away
+
+A batch stops as soon as it has its six of a style, so how much it discards on
+the way depends on how lucky the first few rolls were. Five identical runs threw
+away between 19 and 61 candidates, which is a wider spread than most changes
+worth testing, and it was very nearly used as evidence twice.
+
+`vrtest --stats=N` rolls the same number every time, screens each once with no
+retry, and writes nothing. Two runs of it gave 55% and 58%, and the per style
+counts landed within a few of each other. That is a number a change can be judged
+against.
+
+It also found the largest fault in the generator, which the batch had been hiding
+for months. Seven bass rolls in ten were being rejected, and the batch never
+showed it because it simply rolled again, up to eight times a slot, and reported
+96% usable.
+
+## A note that is slow is not a note that is long
+
+Those basses were rejected for `note keeps going`, and none of them kept going.
+Played and held, every one of them stopped. What they had in common was the
+opposite end: they took up to 1.35 seconds to reach full level, against 6 to 92
+milliseconds for a bass that sounds right.
+
+A note that slow to rise has more of its energy late in the hold than early,
+which is exactly what the held note check measures, so it flagged them and named
+the wrong fault. Leaning the attack short was not enough on its own, so a struck
+style now has a hard ceiling on it, the way it already had one on sustain: bass
+at 0.16, percussion at 0.10, against the 0.12 to 0.13 that basses which sound
+right sit at. The decay ceiling came down with it, from 1.30 to 1.20, because at
+1.29 a bass took 2.4 seconds to fall to a tenth of its peak.
+
+The held note limit could then be loosened from a fifth to a whole, since what is
+left for it to catch is the real case, a note genuinely louder late than early.
+
+| | before | after |
+|---|---|---|
+| bass rejected for droning, per 40 rolls | 27 | 0 |
+| percussion | 12 | 0 |
+| bass attack | up to 1352 ms | 5 to 322 ms |
+
+None of it came from the numbers. The numbers said the notes would not stop, and
+they were wrong. It came from playing them.
+
 ## What a slider is worth
 
 `vrtest --axis=<key> --trials=N` builds the same patch twice from one seed, once

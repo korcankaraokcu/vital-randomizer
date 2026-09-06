@@ -62,6 +62,7 @@ namespace audition
             mean, so a patch that sweeps reads high and a static one reads zero.
         */
         float spectralMotion = 0.0f;
+
         /*  Late energy against early energy, with the note still held.
 
             Whether a note keeps going is not something the sustain parameter

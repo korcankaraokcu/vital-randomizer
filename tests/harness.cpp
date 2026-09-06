@@ -150,6 +150,16 @@ int main (int argc, char** argv)
     juce::File diagFile;
     juce::String axisKey;
     int trials = 24;
+    /*  Roll a fixed number of candidates and count what happens to them, rather
+        than rolling until a batch is full.
+
+        A batch stops as soon as it has its six, so the number it throws away
+        getting there depends on how lucky the first few were. Five identical
+        runs rejected between 19 and 61 candidates, which is a wider spread than
+        most changes worth testing, and that made the tally useless as evidence.
+        This rolls the same number every time and writes nothing.
+    */
+    int statsRolls = 0;
     /*  Where to write the candidates the screen threw away.
 
         A threshold that cannot be listened to is a threshold nobody can argue
@@ -179,6 +189,7 @@ int main (int argc, char** argv)
             else
                 complexity = value.getFloatValue();
         }
+        if (arg.startsWith ("--stats="))     statsRolls = value.getIntValue();
         if (arg.startsWith ("--rejects="))   rejectsTo = juce::File (value);
         if (arg.startsWith ("--axis="))      axisKey = value.trim();
         if (arg.startsWith ("--trials="))    trials = value.getIntValue();
@@ -436,7 +447,8 @@ int main (int argc, char** argv)
             genuinely cannot produce them.
         */
         int saved = 0;
-        for (int i = 0; saved < perStyle && i < perStyle * 8; ++i)
+        for (int i = 0; i < (statsRolls > 0 ? statsRolls : perStyle * 8)
+                        && (statsRolls > 0 || saved < perStyle); ++i)
         {
             gen::Request request;
             request.style = style.toStdString();
@@ -478,7 +490,9 @@ int main (int argc, char** argv)
             bool accepted = false;
             audition::Measurement accepted_m;
 
-            for (int attempt = 0; attempt < 8 && ! accepted; ++attempt)
+            // One look each in stats mode. Retrying until something passes is
+            // what makes the count depend on luck.
+            for (int attempt = 0; attempt < (statsRolls > 0 ? 1 : 8) && ! accepted; ++attempt)
             {
     /*  Correct, then re-measure, then correct again if needed.
 
@@ -514,6 +528,9 @@ int main (int argc, char** argv)
                                       : m.lopsided ? "lopsided" : "unusable"]++;
                         break;
                     }
+
+                    const auto settings_decay =
+                        result.preset["settings"].value ("env_1_decay", 0.0);
 
                     /*  Balance before brightness. High frequency detail is
                         fine as long as it is quiet, so what decides whether a
@@ -560,6 +577,15 @@ int main (int argc, char** argv)
                     {
                         exhausted = false;
                         rejects[style]["note keeps going"]++;
+                        if (rejectsTo != juce::File())
+                        {
+                            rejectsTo.createDirectory();
+                            rejectsTo.getChildFile (style + "_keepsgoing_held"
+                                + juce::String ((int) (100.0f * m.heldRatio))
+                                + "_decay" + juce::String ((int) (100.0 * settings_decay))
+                                + "_" + juce::String (result.seed) + ".vital")
+                                     .replaceWithText (result.preset.dump (2));
+                        }
                         break;
                     }
 
@@ -689,7 +715,7 @@ int main (int argc, char** argv)
             if (score.ok)
             {
                 ++saved;
-                if (saveTo != juce::File())
+                if (saveTo != juce::File() && statsRolls == 0)
                 {
                     saveTo.createDirectory();
                     auto out = result.preset;

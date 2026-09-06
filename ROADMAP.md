@@ -4,42 +4,50 @@ Open work, roughly in the order I would do it. Anything measured is measured, so
 the numbers here come from `vrtest` and from rendering through Vital rather than
 from impressions.
 
-## 1. The reject count is too noisy to judge a change by
+## 1. A level that will not settle is now the commonest rejection
 
-Five runs of the same code, six patches a style, gave between 19 and 61 rejected
-candidates, and bass was thrown out for droning between 0 and 18 times. One run
-filled every slot without a single reject and the next needed nine goes at one
-bass.
+Forty four of the ninety rejections in a 240 roll run, spread across every style,
+and the largest single reason in six of the eight. SFX is the worst at fifteen.
 
-The 48 presets a run keeps are fine. It is the count of what it threw away
-getting there that swings, and that range is wider than most of the changes
-anybody would want to test, so the tally cannot tell a real improvement from a
-lucky run. It was very nearly used that way twice today. The style summary is steadier, because it
-averages over what got through rather than counting rare events, but anything
-event shaped needs far more patches than a listening batch wants to be.
+It means the level matching ran its three passes and the patch still was not
+where it was aimed. That is a patch whose loudness depends on something the
+correction cannot reach, most likely a compressor or a limiter in its own chain
+responding to the master volume rather than tracking it. Worth finding out
+whether those patches are unusable or merely uncalibrated, because if it is the
+latter they are being thrown away for a bookkeeping failure.
 
-`--per-style=16` exists and takes about an hour. Something that fills a batch and
-keeps rolling for statistics without writing 128 files would be better.
+## 2. Keys and lead are still throwing away bright candidates
 
-## 2. A bass that keeps going, when it happens
+Eleven each per 240 rolls, and now the only style rule that fires in any number.
+The ceilings were recalibrated when the centroid started measuring energy, but
+they were set from a p90 of fourteen hand-made presets a style, which is a thin
+sample to draw a hard line from.
 
-The cause named in the notes is closed: a cyclic source wired to an oscillator's
-level pushed the note back up with the key still down, and bass and percussion
-now drop those routings. Verified structurally, 0 of 6 in a batch where it used
-to be 1 of 6.
+`--rejects=<dir>` writes what the screen discarded with its reading in the name,
+which is how the bass ceiling turned out to be wrong. The same listen would say
+whether these two are.
 
-Whether that fixed the rejections cannot be told from the batches, per item 1.
-The accepted basses are clean, sustain at zero and no tail, so if there is
-anything left it is most likely the decay sitting at the top of its 1.08 to 1.30
-band and lasting long enough to trip the held note check.
-
-## 3. DIRT is scored on a number that may not be measuring it
+## 3. DIRT is the weakest axis and neither metric measures it well
 
 Agreement by axis: BRIGHT 97%, SPACE 93%, MOVE 77%, DIRT 72%.
 
 DIRT is scored on crest, on the reasoning that distortion fills in the gap
-between peak and average. That is true, and the level matching pass also changes
-peak against average, so the number may be reading the loudness correction rather
-than the axis. Three metrics turned out to be measuring the wrong thing in a
-single day, so this one deserves the same suspicion before anybody concludes the
-axis is weak. High harmonic energy or spectral flatness would settle it.
+between peak and average. The level matching also changes peak against average,
+so that number was suspect, and spectral flatness was tried instead as something
+the loudness correction cannot touch. It scored 59%, worse, with percussion
+inverted at 20%.
+
+So crest stays, and the honest reading is that DIRT is genuinely the weakest of
+the four rather than mismeasured. Where it fails is worth noting, because it is
+not spread evenly (40 trials a style, 316 pairs):
+
+| Percussion | Bass | Lead | Experiment | SFX | Keys | Pad | Sequence |
+|---|---|---|---|---|---|---|---|
+| 97% | 87% | 80% | 66% | 65% | 62% | 61% | 60% |
+
+It works on the styles whose crest is low to begin with and fails on the ones
+that are already dense, which is itself a hint that the metric is reading the
+signal rather than the drive. Both attempts are recorded here so neither gets
+tried again. What would settle it is a metric built from what DIRT actually
+drives, the energy that distortion adds between the harmonics, rather than a
+whole signal statistic that other stages also move.

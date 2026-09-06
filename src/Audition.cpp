@@ -80,8 +80,17 @@ namespace audition
             band the style is meant to have: a bass is asked for roughly a second
             of body, and a second of body still has something left at 1.2s.
         */
-        if (style == "Bass")       return 0.20f;
-        if (style == "Percussion") return 0.10f;
+        /*  Loosened once the attack was capped.
+
+            A fifth was rejecting seven bass rolls in ten, and listening to what
+            it threw away said none of them held on: they were slow to start, so
+            more of their energy landed late in the hold, and this number read
+            that as a note that would not stop. With the attack capped, what is
+            left for this to catch is the real case, a note that is genuinely
+            louder late than early.
+        */
+        if (style == "Bass")       return 1.00f;
+        if (style == "Percussion") return 0.60f;
         if (style == "Keys")       return 0.60f;   // short, but a key can be held
         // One means no limit at all, and it has to mean that rather than a
         // ceiling of one. A pad swells, so late in a held note it is louder
@@ -387,6 +396,7 @@ namespace audition
             }
             m.centroidHz = total > 1.0e-9 ? (float) (weighted / total) : 0.0f;
             m.lowRatio = total > 1.0e-9 ? (float) (lowEnergy / total) : 0.0f;
+
         }
 
         /*  The loudest moment up top, against the loudest moment overall.
