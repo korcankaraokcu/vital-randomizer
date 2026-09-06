@@ -308,14 +308,27 @@ namespace archetype
             { R"(^eq_low_gain$)",                       -10.0f,  10.0f },
 
             // oscillators
-            { R"(^osc_\d_level$)",                        0.0f,   0.85f },
+            /*  Never down to zero. Whether an oscillator sounds is a
+                structural decision the archetype and COMPLEX make by switching
+                it on or off. Letting the jitter reach zero decided it a second
+                way, and left an oscillator switched on, wired up and silent.
+            */
+            { R"(^osc_\d_level$)",                        0.08f,  0.85f },
             { R"(^osc_\d_wave_frame$)",                   0.0f, 256.0f },
             { R"(^osc_\d_spectral_morph_amount$)",        0.0f,   1.0f },
             { R"(^osc_\d_distortion_amount$)",            0.0f,   0.85f },
             { R"(^osc_\d_unison_detune$)",                0.0f,   5.5f },
             { R"(^osc_\d_unison_voices$)",                1.0f,   9.0f },
             { R"(^osc_\d_pan$)",                          0.0f,   0.0f },   // never
-            { R"(^sample_level$)",                        0.0f,   0.45f },
+            /*  The noise layer is Vital's own sample, so it is the same audio
+                in every patch and only these decide what it sounds like. With
+                just the level here it was one fixed sound turned up and down.
+                Where it is routed matters most: through a filter it is a bed,
+                past one it is hiss.
+            */
+            { R"(^sample_level$)",                        0.05f,  0.45f },
+            { R"(^sample_destination$)",                  0.0f,   3.0f },
+            { R"(^sample_transpose$)",                  -12.0f,   0.0f },
 
             // envelopes
             { R"(^env_1_attack$)",                        0.0f,   1.3f },
@@ -343,9 +356,32 @@ namespace archetype
             { R"(^delay_feedback$)",                      0.0f,   0.7f },
             { R"(^chorus_dry_wet$)",                      0.0f,   0.45f },
             { R"(^chorus_frequency$)",                   -5.0f,   1.0f },
-            { R"(^phaser_dry_wet$)",                      0.0f,   0.5f },
-            { R"(^phaser_frequency$)",                   -5.0f,   1.0f },
-            { R"(^flanger_frequency$)",                  -5.0f,   1.0f },
+            /*  The modulation effects, from p10 to p90 of the presets in a real
+                library that use them.
+
+                Only the frequencies used to be here, and both are dead
+                parameters: sync is on, so the rate comes from the tempo instead
+                and the frequency is ignored. Everything else sat at Vital's
+                factory value, which meant every generated flanger was the same
+                flanger, at the wettest setting real presets use. That is what
+                made half a batch sound alike.
+
+                The wet floors are deliberately above zero. An effect switched on
+                at no wet level is the same switch in the wrong position an
+                oscillator can be left in.
+            */
+            { R"(^phaser_dry_wet$)",                      0.10f,  0.75f },
+            { R"(^phaser_center$)",                      49.0f, 107.0f },
+            { R"(^phaser_feedback$)",                     0.0f,   0.78f },
+            { R"(^phaser_mod_depth$)",                    2.0f,  33.0f },
+            { R"(^phaser_phase_offset$)",                 0.0f,   0.75f },
+            { R"(^phaser_tempo$)",                        1.0f,   5.0f },
+            { R"(^flanger_dry_wet$)",                     0.10f,  0.45f },
+            { R"(^flanger_center$)",                     16.0f,  94.0f },
+            { R"(^flanger_feedback$)",                    0.0f,   0.85f },
+            { R"(^flanger_mod_depth$)",                   0.05f,  1.0f },
+            { R"(^flanger_phase_offset$)",                0.0f,   0.5f },
+            { R"(^flanger_tempo$)",                       1.0f,   6.0f },
         };
         return table;
     }

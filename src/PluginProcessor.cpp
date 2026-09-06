@@ -358,11 +358,17 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
             return false;
 
         // Give back the note that was pressed, or roll again.
+        /*  A stepping patch is read a step at a time. Measured whole, a clean
+            sequence looks like noise, because the window spans several notes.
+        */
         const auto pitch = audition::pitchRuleFor (styleName);
-        const auto pitchError = pitch.octavesOnly ? measured.pitchErrorSemitones
+        const auto stepped = audition::isSteppedStyle (styleName) && measured.steps > 0;
+        const auto salience = stepped ? measured.stepSalience : measured.pitchSalience;
+        const auto pitchError = stepped ? measured.stepOffGridSemitones
+                              : pitch.octavesOnly ? measured.pitchErrorSemitones
                                                   : measured.pitchOffGridSemitones;
         if (pitch.required
-            && (measured.pitchSalience < pitch.minSalience
+            && (salience < pitch.minSalience
                 || pitchError > pitch.maxErrorSemitones))
             return false;
 

@@ -348,23 +348,14 @@ namespace gen
             }
         }
 
-        if (r.locks.count (schema::Section::fx) == 0)
-        {
-            // Effects are where a simple patch and an involved one differ most
-            // audibly, so the sparse end really does switch things off.
-            if (complexity < 0.3f)
-            {
-                for (const auto& fx : { "phaser_on", "flanger_on", "chorus_on" })
-                    if (settings.contains (fx))
-                        settings[fx] = 0.0;
-            }
-            else if (! mustStopDead)
-            {
-                for (const auto& fx : { "phaser_on", "flanger_on" })
-                    if (settings.contains (fx) && chance (0.55f))
-                        settings[fx] = 1.0;
-            }
-        }
+        // Effects are where a simple patch and an involved one differ most
+        // audibly, so the sparse end really does switch things off. Turning them
+        // back on is left to MOVE, which already owns them: two paths enabling
+        // the same effect put a flanger on half of every batch.
+        if (r.locks.count (schema::Section::fx) == 0 && complexity < 0.3f)
+            for (const auto& fx : { "phaser_on", "flanger_on", "chorus_on" })
+                if (settings.contains (fx))
+                    settings[fx] = 0.0;
     }
 
     void Generator::synthesiseContent (const Request& r, nlohmann::json& settings,
@@ -497,9 +488,26 @@ namespace gen
                 continue;
 
             const auto current = settings[key].get<float>();
-            const auto at = (current - low) / juce::jmax (1.0e-6f, high - low);
-            const auto moved = juce::jlimit (0.0f, 1.0f, at + gaussian (rng, spread));
-            settings[key] = low + moved * (high - low);
+
+            /*  Nudging assumes the value it starts from was chosen. A value
+                outside the range was not: it is Vital's factory setting for a
+                parameter nobody has touched, so it gets a fresh draw instead.
+
+                Nudging it would clamp it to whichever end it sits past and
+                leave it there. That is what pinned every flanger to the wettest
+                setting the range allows and made half a batch sound alike.
+            */
+            const auto at = current < low || current > high
+                                ? uniform (rng)
+                                : juce::jlimit (0.0f, 1.0f,
+                                                (current - low) / juce::jmax (1.0e-6f, high - low)
+                                                    + gaussian (rng, spread));
+            const auto value = low + at * (high - low);
+
+            // A stepped parameter has to land on a step. Vital reads 6.76 unison
+            // voices as six, so it works either way, but half a step is not a
+            // value anybody chose and it does not survive a round trip.
+            settings[key] = schema::isIndexed (key) ? std::round (value) : value;
         }
     }
 
@@ -795,6 +803,48 @@ namespace gen
             }
         }
 
+        /*  Whatever was aimed at an oscillator has to go when that oscillator
+            does, or the patch keeps paying for it: modulation slots spent
+            driving something silent, and a second filter left being fed by
+            nothing at all.
+        */
+        for (int i = 1; i <= 4; ++i)
+        {
+            // 1..3 are the oscillators, 4 is the noise layer, which carries the
+            // same switch and level pair and so goes wrong the same way.
+            const auto name = i <= 3 ? "osc_" + std::to_string (i) : std::string ("sample");
+            if (settings.value (name + "_on", 0.0) >= 0.5)
+                continue;
+
+            const auto prefix = name + "_";
+            int cleared = 0;
+            for (auto& slot : settings["modulations"])
+            {
+                if (modSource (slot).empty() || modDest (slot).rfind (prefix, 0) != 0)
+                    continue;
+                slot["source"] = "";
+                slot["destination"] = "";
+                ++cleared;
+            }
+            if (cleared > 0)
+                notes.push_back (name + " is off, dropped " + std::to_string (cleared)
+                                 + " routing(s) aimed at it");
+
+            /*  Filter 2 in parallel is fed by this oscillator alone, so with the
+                oscillator gone it processes silence. Put it back in series
+                behind filter 1, where it still has something to work on.
+            */
+            if (settings.value (prefix + "destination", 0.0) >= 0.5
+                && settings.value ("filter_2_on", 0.0) >= 0.5
+                && settings.value ("filter_2_filter_input", 0.0) < 0.5)
+            {
+                settings[prefix + "destination"] = 0.0;
+                settings["filter_2_filter_input"] = 1.0;
+                notes.push_back ("filter 2 was fed only by the silent " + name
+                                 + ", moved it in series");
+            }
+        }
+
         // A pitched instrument needs a pitched source. Noise alone is a sweep.
         int audibleOscs = 0;
         for (int i = 1; i <= 3; ++i)
@@ -809,12 +859,20 @@ namespace gen
             notes.push_back ("no oscillator was audible, switched osc 1 on");
         }
 
-        // Noise belongs under the oscillators, not over them.
+        // Noise belongs under the oscillators, not over them, and a noise layer
+        // switched on at no level is the same switch in the wrong position an
+        // oscillator can be left in.
         if (settings.value ("sample_on", 0.0) >= 0.5
             && settings.value ("sample_level", 0.0) > 0.45)
         {
             settings["sample_level"] = 0.3;
             notes.push_back ("noise was louder than the oscillators, brought down");
+        }
+        if (settings.value ("sample_on", 0.0) >= 0.5
+            && settings.value ("sample_level", 0.0) <= 0.02)
+        {
+            settings["sample_on"] = 0.0;
+            notes.push_back ("noise was on but silent, switched off");
         }
 
         /*  Keep the patch centred. A randomised pan does not read as width, it

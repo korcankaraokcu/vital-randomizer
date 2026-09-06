@@ -70,6 +70,49 @@ def short_term_level(mono, window=0.09, percentile=90):
     return float(np.percentile(levels, percentile))
 
 
+def pitch_of(segment):
+    """Autocorrelation over one window. Returns the pitch and how definite it
+       is, 1 being a clear note and 0 noise."""
+    if len(segment) < 2048:
+        return 0.0, 0.0
+    segment = segment - segment.mean()
+    correlation = np.correlate(segment, segment, mode="full")[len(segment) - 1:]
+    if correlation[0] < 1e-12:
+        return 0.0, 0.0
+    correlation /= correlation[0]
+    lo, hi = int(SR / 2000), int(SR / 40)
+    band = correlation[lo:hi]
+    return SR / (int(np.argmax(band)) + lo), float(band.max())
+
+
+def detect_steps(mono, window=0.09, limit=24):
+    """The same, a step at a time.
+
+    A sequence is meant to move, so measuring whether it holds one pitch asks
+    the wrong question. A 0.35s window spans about three steps of a synced LFO
+    and autocorrelation smears them together, which made clean sequences read as
+    noise. These windows are shorter than a sixteenth at 120 BPM, so each holds
+    one step."""
+    envelope = np.convolve(np.abs(mono), np.ones(1024) / 1024, mode="same")
+    peak = envelope.max()
+    if peak < 1e-6:
+        return []
+    loud = np.where(envelope > peak * 0.35)[0]
+    if len(loud) < SR // 10:
+        return []
+
+    step, out = int(SR * window), []
+    for at in range(loud[0] + 512, len(mono) - step, step):
+        if np.abs(mono[at:at + step]).max() < peak * 0.2:
+            continue        # between steps, or past the end of the note
+        hz, salience = pitch_of(mono[at:at + step])
+        if hz > 0:
+            out.append((hz, salience))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def detect_pitch(mono):
     """Autocorrelation over the loudest part of the note. Returns the pitch and
        how definite it is, 1 being a clear steady note and 0 noise."""
@@ -81,19 +124,7 @@ def detect_pitch(mono):
     if len(loud) < SR // 10:
         return 0.0, 0.0
 
-    segment = mono[loud[0] + 512:loud[0] + 512 + int(SR * 0.35)]
-    if len(segment) < 2048:
-        return 0.0, 0.0
-    segment = segment - segment.mean()
-    correlation = np.correlate(segment, segment, mode="full")[len(segment) - 1:]
-    if correlation[0] < 1e-12:
-        return 0.0, 0.0
-    correlation /= correlation[0]
-
-    lo, hi = int(SR / 2000), int(SR / 40)
-    band = correlation[lo:hi]
-    lag = int(np.argmax(band)) + lo
-    return SR / lag, float(band.max())
+    return pitch_of(mono[loud[0] + 512:loud[0] + 512 + int(SR * 0.35)])
 
 
 def files_in(target):
@@ -129,12 +160,37 @@ def cmd_level(args):
 
 
 def cmd_pitch(args):
+    """A note is judged against the key that was pressed, except where the patch
+       is meant to move. A sequence steps on purpose, so each step is judged on
+       whether it lands on a semitone rather than on where it sits.
+
+       Note this renders with no transport, so a tempo synced LFO runs at Vital's
+       own default rate rather than the 120 BPM the plugin gives it. Step timing
+       here will not match the plugin's, which is fine for asking whether the
+       steps are clean and wrong for comparing their rate."""
     plugin, template = open_vital(args.vst3)
     print("pitch against the pressed note, C3 at %.1f Hz" % EXPECTED_HZ)
     print("%-22s %-10s %-11s %s" % ("file", "salience", "pitch", "off by"))
     for path in files_in(args.target):
         audio, _ = render(plugin, template, path)
-        hz, salience = detect_pitch(audio.mean(axis=0))
+        mono = audio.mean(axis=0)
+        stepped = "Sequence" in os.path.basename(path)
+
+        if stepped:
+            steps = detect_steps(mono)
+            if not steps:
+                print("%-22s %s" % (os.path.basename(path), "no pitch found"))
+                continue
+            offs = [abs(s - round(s)) for s in
+                    (12 * np.log2(hz / EXPECTED_HZ) for hz, _ in steps)]
+            salience = float(np.median([s for _, s in steps]))
+            error = float(np.median(offs))
+            print("%-22s %-10.2f %2d steps      %.2f off the grid%s"
+                  % (os.path.basename(path), salience, len(steps), error,
+                     "   <-- off the grid" if error > 0.35 else ""))
+            continue
+
+        hz, salience = detect_pitch(mono)
         if hz <= 0:
             print("%-22s %s" % (os.path.basename(path), "no pitch found"))
             continue

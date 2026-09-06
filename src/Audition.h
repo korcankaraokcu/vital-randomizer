@@ -58,6 +58,23 @@ namespace audition
         float pitchSalience = 0.0f;     // 1 is a clear steady note, 0 is noise
         float pitchErrorSemitones = 0.0f;   // distance from the nearest octave
         float pitchOffGridSemitones = 0.0f; // distance from the nearest semitone
+
+        /*  The same three, measured a step at a time.
+
+            A sequence is meant to move, so asking whether it holds one pitch
+            asks the wrong question. The window above is 0.35s and a synced LFO
+            steps every 0.125s at 120 BPM, so it spans about three different
+            notes; autocorrelation smears them into one smeared answer with a
+            low salience. Patches that sound perfectly clean measured 0.20.
+
+            These split the note into windows short enough to hold a single step
+            and report the median across them, so a clean sequence of clean notes
+            reads as what it is.
+        */
+        float stepSalience = 0.0f;
+        float stepErrorSemitones = 0.0f;
+        float stepOffGridSemitones = 0.0f;
+        int steps = 0;
         bool silent = false;
         bool clickOnly = false;
         bool clipping = false;
@@ -111,6 +128,13 @@ namespace audition
         against the root and calling a perfect fourth wrong rejected patches
         that were doing exactly what they were designed to.
     */
+    /*  Whether a style's pitch should be read a step at a time.
+
+        A sequence steps on purpose, so its note presence and its tuning are
+        properties of each step rather than of the whole note.
+    */
+    bool isSteppedStyle (const std::string& style);
+
     struct PitchRule
     {
         bool required;

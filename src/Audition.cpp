@@ -44,6 +44,11 @@ namespace audition
         constexpr float kMaxBalanceDb = 6.0f;
     }
 
+    bool isSteppedStyle (const std::string& style)
+    {
+        return style == "Sequence";
+    }
+
     PitchRule pitchRuleFor (const std::string& style)
     {
         if (style == "Bass" || style == "Keys" || style == "Lead")
@@ -353,12 +358,16 @@ namespace audition
                 }
             }
 
-            const auto span = (size_t) (0.35 * sampleRate);
-            const auto from = juce::jmin (loudest, mono.size() > span ? mono.size() - span : 0u);
-            const auto count = juce::jmin (span, mono.size() - from);
+            const auto expected = 440.0 * std::pow (2.0, (note - 69) / 12.0);
 
-            if (count > 2048)
+            // Autocorrelation over one window. Returns false when the window
+            // holds nothing worth measuring.
+            const auto analyse = [&] (size_t from, size_t count,
+                                      float& hz, float& salience) -> bool
             {
+                if (count <= 2048 || from + count > mono.size())
+                    return false;
+
                 double mean = 0.0;
                 for (size_t i = 0; i < count; ++i)
                     mean += mono[from + i];
@@ -370,40 +379,91 @@ namespace audition
                     const auto x = mono[from + i] - mean;
                     zero += x * x;
                 }
+                if (zero <= 1.0e-12)
+                    return false;
 
-                if (zero > 1.0e-12)
+                const auto minLag = (size_t) (sampleRate / 2000.0);
+                const auto maxLag = juce::jmin ((size_t) (sampleRate / 40.0), count / 2);
+                double bestScore = 0.0;
+                size_t bestLag = 0;
+
+                for (size_t lag = minLag; lag < maxLag; ++lag)
                 {
-                    const auto minLag = (size_t) (sampleRate / 2000.0);
-                    const auto maxLag = juce::jmin ((size_t) (sampleRate / 40.0), count / 2);
-                    double bestScore = 0.0;
-                    size_t bestLag = 0;
-
-                    for (size_t lag = minLag; lag < maxLag; ++lag)
+                    double sum = 0.0;
+                    for (size_t i = 0; i + lag < count; ++i)
+                        sum += (mono[from + i] - mean) * (mono[from + i + lag] - mean);
+                    const auto score = sum / zero;
+                    if (score > bestScore)
                     {
-                        double sum = 0.0;
-                        for (size_t i = 0; i + lag < count; ++i)
-                            sum += (mono[from + i] - mean) * (mono[from + i + lag] - mean);
-                        const auto score = sum / zero;
-                        if (score > bestScore)
-                        {
-                            bestScore = score;
-                            bestLag = lag;
-                        }
+                        bestScore = score;
+                        bestLag = lag;
                     }
+                }
 
-                    if (bestLag > 0)
-                    {
-                        m.pitchSalience = (float) juce::jlimit (0.0, 1.0, bestScore);
-                        m.pitchHz = (float) (sampleRate / (double) bestLag);
+                if (bestLag == 0)
+                    return false;
 
-                        // Distance from the nearest octave of the note played.
-                        // An octave is still the same note; a fifth is not.
-                        const auto expected = 440.0 * std::pow (2.0, (note - 69) / 12.0);
-                        const auto semis = 12.0 * std::log2 (m.pitchHz / expected);
-                        const auto octaves = std::round (semis / 12.0);
-                        m.pitchErrorSemitones = (float) std::abs (semis - octaves * 12.0);
-                        m.pitchOffGridSemitones = (float) std::abs (semis - std::round (semis));
-                    }
+                salience = (float) juce::jlimit (0.0, 1.0, bestScore);
+                hz = (float) (sampleRate / (double) bestLag);
+                return true;
+            };
+
+            const auto errorsFor = [&] (float hz, float& octaveError, float& offGrid)
+            {
+                const auto semis = 12.0 * std::log2 (hz / expected);
+                // An octave is still the same note; a fifth is not.
+                octaveError = (float) std::abs (semis - std::round (semis / 12.0) * 12.0);
+                offGrid = (float) std::abs (semis - std::round (semis));
+            };
+
+            const auto span = (size_t) (0.35 * sampleRate);
+            const auto from = juce::jmin (loudest, mono.size() > span ? mono.size() - span : 0u);
+            const auto count = juce::jmin (span, mono.size() - from);
+
+            if (analyse (from, count, m.pitchHz, m.pitchSalience))
+                errorsFor (m.pitchHz, m.pitchErrorSemitones, m.pitchOffGridSemitones);
+
+            /*  The same again, a step at a time. 0.09s is shorter than a
+                sixteenth at 120 BPM, so a window holds one step rather than
+                three, and each one is measured on its own terms.
+            */
+            {
+                const auto step = (size_t) (0.09 * sampleRate);
+                const auto quiet = m.peak * 0.2f;
+                std::vector<float> saliences, octaveErrors, offGrids;
+
+                for (size_t at = from; at + step <= mono.size() && saliences.size() < 24u;
+                     at += step)
+                {
+                    float loud = 0.0f;
+                    for (size_t i = 0; i < step; ++i)
+                        loud = juce::jmax (loud, std::abs (mono[at + i]));
+                    if (loud < quiet)
+                        continue;   // between notes, or past the end of one
+
+                    float hz = 0.0f, salience = 0.0f;
+                    if (! analyse (at, step, hz, salience))
+                        continue;
+
+                    float octaveError = 0.0f, offGrid = 0.0f;
+                    errorsFor (hz, octaveError, offGrid);
+                    saliences.push_back (salience);
+                    octaveErrors.push_back (octaveError);
+                    offGrids.push_back (offGrid);
+                }
+
+                const auto median = [] (std::vector<float>& v)
+                {
+                    std::sort (v.begin(), v.end());
+                    return v.empty() ? 0.0f : v[v.size() / 2];
+                };
+
+                m.steps = (int) saliences.size();
+                if (m.steps > 0)
+                {
+                    m.stepSalience = median (saliences);
+                    m.stepErrorSemitones = median (octaveErrors);
+                    m.stepOffGridSemitones = median (offGrids);
                 }
             }
         }

@@ -101,11 +101,11 @@ namespace schema
 
     bool isIndexed (const std::string& param)
     {
-        static const std::array<const char*, 22> suffixes = {
+        static const std::array<const char*, 23> suffixes = {
             "_model", "_type", "_sync", "_mode", "_style", "_source", "_destination",
             "_routing", "_wave", "_voices", "_transpose", "_octave", "_on", "_switch",
             "_bipolar", "_stereo", "_snap", "_keytrack", "_dc", "_normalize",
-            "_smooth", "_stack",
+            "_smooth", "_stack", "_tempo",
         };
         return std::any_of (suffixes.begin(), suffixes.end(),
                             [&] (const char* s) { return endsWith (param, s); });

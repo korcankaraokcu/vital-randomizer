@@ -390,14 +390,18 @@ int main (int argc, char** argv)
                     }
 
                     const auto pitch = audition::pitchRuleFor (style.toStdString());
-                    const auto pitchError = pitch.octavesOnly ? m.pitchErrorSemitones
+                    const auto stepped = audition::isSteppedStyle (style.toStdString())
+                                             && m.steps > 0;
+                    const auto salience = stepped ? m.stepSalience : m.pitchSalience;
+                    const auto pitchError = stepped ? m.stepOffGridSemitones
+                                          : pitch.octavesOnly ? m.pitchErrorSemitones
                                                               : m.pitchOffGridSemitones;
                     if (pitch.required
-                        && (m.pitchSalience < pitch.minSalience
+                        && (salience < pitch.minSalience
                             || pitchError > pitch.maxErrorSemitones))
                     {
                         exhausted = false;
-                        rejects[style][m.pitchSalience < pitch.minSalience
+                        rejects[style][salience < pitch.minSalience
                                            ? "pitch unclear" : "wrong note"]++;
                         break;
                     }
@@ -487,8 +491,12 @@ int main (int argc, char** argv)
             styleTail[style].push_back (accepted_m.rms > 1.0e-9f
                                             ? accepted_m.tailRms / accepted_m.rms : 0.0f);
             styleHeld[style].push_back (accepted_m.heldRatio);
-            stylePitch[style].push_back (accepted_m.pitchErrorSemitones);
-            styleSalience[style].push_back (accepted_m.pitchSalience);
+            const auto acceptedStepped = audition::isSteppedStyle (style.toStdString())
+                                             && accepted_m.steps > 0;
+            stylePitch[style].push_back (acceptedStepped ? accepted_m.stepOffGridSemitones
+                                                         : accepted_m.pitchErrorSemitones);
+            styleSalience[style].push_back (acceptedStepped ? accepted_m.stepSalience
+                                                            : accepted_m.pitchSalience);
 
             juce::StringArray macros;
             for (int m = 0; m < gen::kMacros; ++m)

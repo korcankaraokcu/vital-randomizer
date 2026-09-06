@@ -45,8 +45,10 @@ namespace axes
                 w ("^random_\\d_frequency$", 0.6f),
                 w ("^osc_\\d_unison_detune$", 0.5f),
                 w ("^chorus_frequency$", 0.4f),
-                w ("^flanger_frequency$", 0.4f),
-                w ("^phaser_frequency$", 0.4f),
+                // The tempos, not the frequencies: sync is on, so the rate
+                // comes from the note division and the frequency is ignored.
+                w ("^flanger_tempo$", 0.4f),
+                w ("^phaser_tempo$", 0.4f),
                 w ("^portamento_time$", 0.3f),
             };
             move.flip = { std::regex ("^lfo_\\d_sync$") };
