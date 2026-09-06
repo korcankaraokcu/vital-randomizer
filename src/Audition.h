@@ -34,6 +34,24 @@ namespace audition
         float crestDb = 0.0f;       // peak over rms
         float balanceDb = 0.0f;     // left against right
         float centroidHz = 0.0f;    // where the energy sits, roughly
+
+        /*  How much of the sound is actually down low, and whether anything
+            jumps out up top.
+
+            Centroid alone was the wrong question for a bass. It is a mean, so
+            quiet detail spread across thousands of high bins drags it up even
+            when the low end plainly dominates, and the check was throwing away
+            basses that sound like basses because they had a little sparkle on
+            them. What matters is the ratio of bottom to everything else, and a
+            patch is allowed high frequency detail as long as it is quiet.
+
+            `lowRatio` is the share of the energy below 400 Hz. `highSpike` is
+            the loudest moment above 2 kHz measured against the loudest moment
+            overall, past the attack, since a note-on transient is broadband on
+            purpose and a decayed tail that is all treble is inaudible anyway.
+        */
+        float lowRatio = 0.0f;
+        float highSpike = 0.0f;
         /*  Late energy against early energy, with the note still held.
 
             Whether a note keeps going is not something the sustain parameter
@@ -107,6 +125,15 @@ namespace audition
         complex patch rather than every wrong one.
     */
     Brightness brightnessFor (const std::string& style, float complexity = 0.5f);
+
+    /*  The low end a style has to have, and the loudest it may jump up top.
+
+        Zero and one mean the style does not care. Used instead of the centroid
+        where a style is defined by its balance rather than by where its mean
+        happens to land.
+    */
+    struct BalanceRule { float minLowRatio, maxHighSpike; };
+    BalanceRule balanceFor (const std::string& style);
 
     /** Sentinel meaning a style may ring for as long as it likes. */
     inline constexpr float kNoHeldLimit = 1.0e9f;

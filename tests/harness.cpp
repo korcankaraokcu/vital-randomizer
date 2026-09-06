@@ -147,6 +147,17 @@ int main (int argc, char** argv)
     bool rampComplexity = false;
     juce::File saveTo = juce::File::getCurrentWorkingDirectory().getChildFile ("out");
     juce::File diagFile;
+    juce::String axisKey;
+    int trials = 24;
+    /*  Where to write the candidates the screen threw away.
+
+        A threshold that cannot be listened to is a threshold nobody can argue
+        with. Bass and keys are rejected for brightness far more than any other
+        style, and whether that is the generator making dull patches or the
+        ceiling being set too low is a question for ears, not for another
+        histogram.
+    */
+    juce::File rejectsTo;
     for (int i = 1; i < argc; ++i)
     {
         const juce::String arg (argv[i]);
@@ -167,6 +178,9 @@ int main (int argc, char** argv)
             else
                 complexity = value.getFloatValue();
         }
+        if (arg.startsWith ("--rejects="))   rejectsTo = juce::File (value);
+        if (arg.startsWith ("--axis="))      axisKey = value.trim();
+        if (arg.startsWith ("--trials="))    trials = value.getIntValue();
         if (arg.startsWith ("--save="))      saveTo = juce::File (value);
         if (arg.startsWith ("--diag="))      diagFile = juce::File (value);
     }
@@ -203,10 +217,12 @@ int main (int argc, char** argv)
         {
             const auto m = audition::audition (*h.processor(), kSampleRate, kBlockSize,
                                                48, resetFirst);
-            std::cout << "  " << juce::String (label).paddedRight (' ', 36)
+            std::cout << "  " << juce::String (label).paddedRight (' ', 30)
                       << "rms=" << juce::String (m.rms, 4)
                       << "  peak=" << juce::String (m.peak, 3)
-                      << "  crest=" << juce::String (m.crestDb, 1) << " dB"
+                      << "  centroid=" << juce::String ((int) m.centroidHz) << "Hz"
+                      << "  low=" << juce::String ((int) (100.0f * m.lowRatio)) << "%"
+                      << "  spike=" << juce::String ((int) (100.0f * m.highSpike)) << "%"
                       << std::endl;
         };
 
@@ -257,6 +273,88 @@ int main (int argc, char** argv)
         }
         init.erase ("tuning");
         generator.setInitPreset (std::move (init));
+    }
+
+    /*  Does moving a slider do what it says?
+
+        Build the same patch twice from one seed, once with the slider low and
+        once high, and see whether the sound moved the way the slider claims it
+        should. One seed means the structure is identical on both sides, so
+        anything that differs is the axis's doing and nothing else.
+
+        Screening is deliberately skipped here. A rejected candidate would be
+        rolled again into a different patch, and then the two sides are no longer
+        the same patch with one slider moved.
+    */
+    if (axisKey.isNotEmpty())
+    {
+        std::cout << "\n" << axisKey << ": the same patch built low and high, "
+                  << trials << " seeds per style\n" << std::endl;
+        std::cout << juce::String ("style").paddedRight (' ', 12)
+                  << juce::String ("agreement").paddedRight (' ', 12)
+                  << "median move" << std::endl;
+
+        int agreedAll = 0, testedAll = 0;
+        for (const auto& styleName : styles)
+        {
+            const auto defaults = archetype::defaultSlidersFor (styleName.toStdString());
+            int agreed = 0, tested = 0;
+            std::vector<float> moves;
+
+            for (int t = 0; t < trials; ++t)
+            {
+                const auto seed = (unsigned int) (0x51ED0000u + (unsigned int) t * 2654435761u) | 1u;
+                float centroid[2] = { 0.0f, 0.0f };
+                bool ok = true;
+
+                for (int side = 0; side < 2 && ok; ++side)
+                {
+                    gen::Request request;
+                    request.style = styleName.toStdString();
+                    request.seed = seed;
+                    request.amount = 1.0f;
+                    request.sliders = {
+                        { "bright", defaults.bright }, { "dirt", defaults.dirt },
+                        { "space", defaults.space },   { "move", defaults.move },
+                        { "complexity", defaults.complexity } };
+                    request.sliders[axisKey.toStdString()] = side == 0 ? 0.15f : 0.85f;
+
+                    auto rolled = generator.roll (request);
+                    if (! rolled.ok || ! host.applyPreset (rolled.preset))
+                    {
+                        ok = false;
+                        break;
+                    }
+                    audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                    const auto m = audition::audition (*host.processor(), kSampleRate, kBlockSize);
+                    if (! m.usable() || m.centroidHz <= 0.0f)
+                        ok = false;
+                    else
+                        centroid[side] = m.centroidHz;
+                }
+
+                if (! ok)
+                    continue;
+
+                ++tested;
+                if (centroid[1] > centroid[0])
+                    ++agreed;
+                moves.push_back (centroid[1] - centroid[0]);
+            }
+
+            agreedAll += agreed;
+            testedAll += tested;
+            std::sort (moves.begin(), moves.end());
+            const auto median = moves.empty() ? 0.0f : moves[moves.size() / 2];
+            std::cout << styleName.paddedRight (' ', 12)
+                      << (tested > 0 ? juce::String (100 * agreed / tested) + "%"
+                                     : juce::String ("-")).paddedRight (' ', 12)
+                      << juce::String (median, 0) << " Hz" << std::endl;
+        }
+
+        std::cout << "\noverall " << (testedAll > 0 ? 100 * agreedAll / testedAll : 0)
+                  << "% over " << testedAll << " pairs" << std::endl;
+        return 0;
     }
 
     std::cout << juce::String ("style").paddedRight (' ', 10)
@@ -373,13 +471,45 @@ int main (int argc, char** argv)
                         break;
                     }
 
+                    /*  Balance before brightness. High frequency detail is
+                        fine as long as it is quiet, so what decides whether a
+                        bass is a bass is how much of it sits down low.
+                    */
+                    const auto balance = audition::balanceFor (style.toStdString());
+                    if (m.lowRatio > 0.0f && m.lowRatio < balance.minLowRatio)
+                    {
+                        exhausted = false;
+                        rejects[style]["not enough bottom"]++;
+                        break;
+                    }
+                    if (m.highSpike > balance.maxHighSpike)
+                    {
+                        exhausted = false;
+                        rejects[style]["a burst up top"]++;
+                        break;
+                    }
+
                     const auto bounds = audition::brightnessFor (style.toStdString(),
                                                  request.sliders["complexity"]);
                     if (m.centroidHz > 0.0f
                         && (m.centroidHz < bounds.low || m.centroidHz > bounds.high))
                     {
                         exhausted = false;
-                        rejects[style][m.centroidHz > bounds.high ? "too bright" : "too dark"]++;
+                        const auto why = m.centroidHz > bounds.high ? "too bright" : "too dark";
+                        rejects[style][why]++;
+
+                        if (rejectsTo != juce::File())
+                        {
+                            // Named with the reading and the ceiling it missed,
+                            // so a listen and the number are side by side.
+                            rejectsTo.createDirectory();
+                            const auto name = style + "_" + juce::String (why).replace (" ", "")
+                                            + "_" + juce::String ((int) m.centroidHz) + "Hz"
+                                            + "_limit" + juce::String ((int) bounds.high)
+                                            + "_" + juce::String (result.seed) + ".vital";
+                            rejectsTo.getChildFile (name)
+                                     .replaceWithText (result.preset.dump (2));
+                        }
                         break;
                     }
                     if (m.heldRatio > audition::maxHeldRatioFor (style.toStdString()))

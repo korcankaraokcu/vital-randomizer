@@ -420,6 +420,16 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
 
         // A patch can be perfectly healthy and still be the wrong instrument.
         const auto styleName = currentStyle.toStdString();
+        /*  Balance before brightness. A patch is allowed high frequency detail
+            as long as it stays quiet: what makes a bass a bass is how much of it
+            is down low, not where its mean lands.
+        */
+        const auto balance = audition::balanceFor (styleName);
+        if (measured.lowRatio > 0.0f && measured.lowRatio < balance.minLowRatio)
+            return false;
+        if (measured.highSpike > balance.maxHighSpike)
+            return false;
+
         const auto bounds = audition::brightnessFor (styleName, slider ("complexity"));
         if (measured.centroidHz > 0.0f
             && (measured.centroidHz < bounds.low || measured.centroidHz > bounds.high))

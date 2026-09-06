@@ -438,7 +438,7 @@ namespace gen
                     || r.locks.count (schema::sectionOf (sw)) > 0)
                     continue;
                 if (uniform (rng) < push)
-                    settings[sw] = value > 0.5f ? 1.0 : 0.0;
+                    settings[sw] = (value > 0.5f || ! axis.lowEndDisables) ? 1.0 : 0.0;
             }
 
             // Indexed parameters have no meaningful ordering, since Vital's

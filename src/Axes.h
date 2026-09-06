@@ -39,6 +39,15 @@ namespace axes
         std::vector<Weighted> params;
         std::vector<std::regex> flip;
         std::vector<std::string> enables;   // switches the axis turns on
+        /*  Whether the low end of the axis switches those off again.
+
+            True for the axes whose effect adds the quality they are named for:
+            no reverb is less space, no chorus is less movement. False where the
+            switch is what takes the quality away instead. A filter is the
+            darkness control, so switching it off at low BRIGHT makes the patch
+            brighter, which is the axis contradicting itself at its own end.
+        */
+        bool lowEndDisables = true;
         std::vector<std::string> macroDests;
         bool hasWiring = false;
         MoveWiring wiring;

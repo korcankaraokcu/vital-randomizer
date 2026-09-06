@@ -70,7 +70,7 @@ def short_term_level(mono, window=0.09, percentile=90):
     return float(np.percentile(levels, percentile))
 
 
-def pitch_of(segment):
+def pitch_of(segment, top=2000.0):
     """Autocorrelation over one window. Returns the pitch and how definite it
        is, 1 being a clear note and 0 noise."""
     if len(segment) < 2048:
@@ -80,9 +80,45 @@ def pitch_of(segment):
     if correlation[0] < 1e-12:
         return 0.0, 0.0
     correlation /= correlation[0]
-    lo, hi = int(SR / 2000), int(SR / 40)
-    band = correlation[lo:hi]
-    return SR / (int(np.argmax(band)) + lo), float(band.max())
+    """`top` is the highest pitch worth looking for, and it is a trade.
+
+    The default of 2 kHz keeps a bass on its fundamental: raise it and a short
+    lag correlates on waveform shape rather than period, and one bass came back
+    at 5880 Hz. But a sequence stepping several octaves up sounds above 2 kHz,
+    and with the ceiling there every step returned the band edge instead: lag
+    pinned to exactly 22 samples, 2004.5 Hz, which happens to sit a quarter tone
+    off the semitone grid. That quarter tone was this ceiling, not the patch.
+
+    So the stepped path raises it and the whole-note path does not.
+
+    A whole sample of lag is also a coarse unit up there, 0.77 of a semitone
+    between lag 22 and 23, so the peak is interpolated to recover the fraction.
+    """
+    lo, hi = int(SR / top), int(SR / 40)
+
+    # Autocorrelation starts at 1.0 and falls away, and that opening slope is
+    # not a period. Taking the largest value in the band picked a lag on the
+    # slope instead of the real peak, so the answer was whatever the band
+    # happened to start at: raise the ceiling and the reading followed it up.
+    # Stepping past the descent first makes the peak that is found a real one.
+    start = lo
+    while start < hi and correlation[start] > 0:
+        start += 1
+    if start >= hi:
+        start = lo
+
+    band = correlation[start:hi]
+    if not len(band):
+        return 0.0, 0.0
+    lag = int(np.argmax(band)) + start
+
+    if 0 < lag < len(correlation) - 1:
+        y1, y2, y3 = correlation[lag - 1], correlation[lag], correlation[lag + 1]
+        denom = y1 - 2 * y2 + y3
+        if abs(denom) > 1e-12:
+            lag += float(np.clip(0.5 * (y1 - y3) / denom, -0.5, 0.5))
+
+    return SR / lag, float(band.max())
 
 
 def detect_steps(mono, window=0.09, limit=24):
@@ -105,7 +141,7 @@ def detect_steps(mono, window=0.09, limit=24):
     for at in range(loud[0] + 512, len(mono) - step, step):
         if np.abs(mono[at:at + step]).max() < peak * 0.2:
             continue        # between steps, or past the end of the note
-        hz, salience = pitch_of(mono[at:at + step])
+        hz, salience = pitch_of(mono[at:at + step], top=5000.0)
         if hz > 0:
             out.append((hz, salience))
         if len(out) >= limit:

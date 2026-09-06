@@ -418,6 +418,82 @@ params med 107 (84-130)   routings med 12 (7-23)   filter 2 on in 31 of 48
 84% of candidates usable
 ```
 
+## What makes a bass a bass
+
+Not where its mean lands. The brightness check measured the spectral centroid,
+weighted by magnitude, and a magnitude weighted mean counts bins rather than
+energy: a few thousand quiet high bins outvote the handful of loud low ones. A
+bass with 97% of its energy below 400 Hz was reporting a centroid of 2915 Hz and
+being thrown out. The same patch weighted by energy reads 176 Hz.
+
+That one line was rejecting most of what it rejected. Bass and keys accounted for
+nearly every discarded candidate in a batch, all of it for brightness, and almost
+none of them were too bright. They had a little sparkle on top of a sound that
+was plainly a bass.
+
+So the centroid is weighted by energy now, every style's ceiling is recalibrated
+against the library measured the same way, and bass is judged on its balance
+instead:
+
+| | hand-made p10 | hand-made median | rule |
+|---|---|---|---|
+| energy below 400 Hz | 54% | 97% | at least 60% |
+
+A patch may have as much high frequency detail as it likes as long as that detail
+is quiet, which is what a listener means by a bass with air on it.
+
+**One burst is still worth catching.** A filter LFO swinging wide open mid note
+is loud and high at once, and it is the one thing in this family that does read
+as broken. It is measured as the loudest moment above 2 kHz against the loudest
+moment overall, so a decayed tail that is nothing but treble does not count
+because it is inaudible, and the first 150 ms are skipped because a note-on
+transient is broadband on purpose. Every bass anybody has called good measures
+between 0 and 7 percent. The patch that prompted the rule measures 62.
+
+The rejection rate tells the rest of the story: 48 of 49 rolls usable, against 48
+of 69 before.
+
+## Finding the note
+
+Autocorrelation, over the loudest part of the sound, and two details in it were
+wrong for years without showing.
+
+The band ran from 40 Hz to 2 kHz. A sequence stepping several octaves up sounds
+above that, so every step returned the band edge rather than a pitch: the lag sat
+at exactly 22 samples, 2004.5 Hz, which happens to fall 0.252 semitones off the
+semitone grid. That quarter tone was read as sequences being slightly out of
+tune, and it was the detector hitting its own ceiling.
+
+Raising the ceiling only moved the failure, because the reading followed it up to
+the new edge. The actual fault is that autocorrelation starts at one and falls
+away, and the largest value in the band kept landing on that opening slope rather
+than on a real peak. Stepping past the descent before looking fixed both ends at
+once: a bass that had come back at 5880 Hz returned to its 65 Hz fundamental, and
+a sequence went from a quarter tone off the grid to a fiftieth.
+
+Salience fell with it, from about 0.85 to about 0.45 on a sequence, because the
+number is now the height of a real peak instead of the height of the slope. The
+patches did not change. The Sequence threshold moved from 0.40 to 0.20 to match,
+which is under the 0.26 that the worst patch anybody called good measures at.
+
+## What a slider is worth
+
+`vrtest --axis=bright --trials=32` builds the same patch twice from one seed,
+once with the slider low and once high, and asks whether the sound moved the way
+the slider says it should. One seed means only the axis differs.
+
+It caught the axis arguing with itself. An axis switches its effects on when
+pushed and off at the other end, which is right where the effect adds the quality
+the axis is named for: no reverb is less space. A filter is the opposite, the
+thing that takes brightness away, so switching it off at low BRIGHT made the
+patch brighter. Agreement went from 73% to 85% by leaving it on at both ends.
+
+Two lessons came out of the measuring rather than the fix. Sixteen trials is not
+enough to tune on: the first attempt looked like a clear win at sixteen and was a
+regression at forty eight. And the failure had a shape, at a correlation of -0.75
+between agreement and how open a style's filter already sits, which is what
+pointed at the enables in the first place.
+
 ## Checking it from outside
 
 `tools/measure.py` loads Vital independently and measures the `.vital` files on

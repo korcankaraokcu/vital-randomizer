@@ -53,9 +53,17 @@ namespace audition
     {
         if (style == "Bass" || style == "Keys" || style == "Lead")
             return { true, 0.45f, 0.45f, true };
-        // A sequence may sit on any step, it just has to be on one.
+        /*  A sequence may sit on any step, it just has to be on one.
+
+            The salience bar is lower than the rest because a stepped patch
+            genuinely is less periodic than a held note, and because the number
+            it is compared against got more honest: reading the real peak rather
+            than the shoulder near lag zero took these from around 0.85 to around
+            0.45. Patches that sound clean measure 0.26 and up, so the bar sits
+            under that rather than where the old inflated figure put it.
+        */
         if (style == "Sequence")
-            return { true, 0.40f, 0.35f, false };
+            return { true, 0.20f, 0.35f, false };
         // A pad may be hazier about its pitch than a lead, but it still has to
         // be playing the note somebody pressed.
         if (style == "Pad")
@@ -82,6 +90,26 @@ namespace audition
         return kNoHeldLimit;
     }
 
+    BalanceRule balanceFor (const std::string& style)
+    {
+        /*  A bass is defined by its balance, not by its mean.
+
+            Hand-made basses put a median of 97% of their energy below 400 Hz,
+            with a p10 of 54%, so the floor sits low enough to allow the ones
+            that carry real treble detail. Their loudest moment above 2 kHz runs
+            a median of 0% of the loudest moment overall and a p90 of 21%.
+
+            Measured here, every bass anybody has called good reads between 0%
+            and 7%, while the one that prompted this reads 62% and the next
+            worst 30%. Fifteen sits in the gap, with room either side.
+        */
+        if (style == "Bass")       return { 0.60f, 0.15f };
+        // A kick is mostly bottom too, but a hat is the opposite, so only the
+        // burst rule applies.
+        if (style == "Percussion") return { 0.0f,  1.0f };
+        return { 0.0f, 1.0f };
+    }
+
     Brightness brightnessFor (const std::string& style, float complexity)
     {
         const auto widen = [complexity] (Brightness b)
@@ -89,12 +117,22 @@ namespace audition
             b.high *= 1.0f + 0.45f * juce::jlimit (0.0f, 1.0f, complexity - 0.35f);
             return b;
         };
-        if (style == "Bass")       return widen ({ 0.0f,   2200.0f });
-        if (style == "Keys")       return widen ({ 250.0f, 3400.0f });
+        /*  Recalibrated against the library once the centroid started
+            measuring energy rather than magnitude, which moved every one of
+            these by roughly a factor of five. Hand-made presets, p90 of the
+            energy centroid: bass 413, keys 1225, pad 2294, lead 2060. The
+            ceilings sit above those with room for character.
+
+            Bass keeps one only as a backstop. What decides whether a bass is a
+            bass is the balance rule below, since the sound is defined by how
+            much of it is down low rather than by where its mean lands.
+        */
+        if (style == "Bass")       return widen ({ 0.0f,    900.0f });
+        if (style == "Keys")       return widen ({ 60.0f,  2000.0f });
         // Pads run brighter than the rest and the library agrees, with a p90
         // just past five kilohertz.
-        if (style == "Pad")        return widen ({ 150.0f, 4300.0f });
-        if (style == "Lead")       return widen ({ 400.0f, 5800.0f });
+        if (style == "Pad")        return widen ({ 40.0f,  3500.0f });
+        if (style == "Lead")       return widen ({ 120.0f, 3300.0f });
         // A hat or a click belongs up there, so this one is generous.
         if (style == "Percussion") return widen ({ 0.0f, 12000.0f });
         // Sequence, SFX and Experiment are allowed to go wherever they like.
@@ -328,14 +366,68 @@ namespace audition
             }
             fft.performFrequencyOnlyForwardTransform (data.data());
 
-            double weighted = 0.0, total = 0.0;
+            double weighted = 0.0, total = 0.0, lowEnergy = 0.0;
             for (int i = 1; i < fftSize / 2; ++i)
             {
                 const auto mag = (double) data[(size_t) i];
-                weighted += mag * (i * sampleRate / fftSize);
-                total += mag;
+                /*  Energy, not magnitude.
+
+                    Weighting by magnitude lets a few thousand quiet high bins
+                    outvote the handful of loud low ones, so a bass whose energy
+                    is 98% below 400 Hz was reporting a centroid of 2915 Hz and
+                    being thrown out for brightness. The same patch weighted by
+                    energy reads 124 Hz.
+                */
+                const auto energy = (double) mag * mag;
+                const auto hz = i * sampleRate / fftSize;
+                weighted += energy * hz;
+                total += energy;
+                if (hz < 400.0)
+                    lowEnergy += energy;
             }
             m.centroidHz = total > 1.0e-9 ? (float) (weighted / total) : 0.0f;
+            m.lowRatio = total > 1.0e-9 ? (float) (lowEnergy / total) : 0.0f;
+        }
+
+        /*  The loudest moment up top, against the loudest moment overall.
+
+            Relative to its own window would flag a decayed tail that is all
+            treble and inaudible. What a listener objects to is a burst that is
+            both loud and high, which is what an LFO swinging a filter wide open
+            mid note sounds like.
+        */
+        if (mono.size() >= (size_t) (0.3 * sampleRate))
+        {
+            const auto window = (size_t) (0.05 * sampleRate);
+            const auto skip = (size_t) (0.15 * sampleRate);
+            juce::dsp::FFT fft (11);
+            const auto n = (size_t) 1 << 11;
+            double loudestTotal = 1.0e-12, loudestHigh = 0.0;
+
+            for (size_t at = 0; at + window < mono.size(); at += window / 2)
+            {
+                std::vector<float> data (n * 2, 0.0f);
+                for (size_t i = 0; i < juce::jmin (n, window); ++i)
+                {
+                    const auto w = 0.5f - 0.5f * std::cos (2.0f * juce::MathConstants<float>::pi
+                                                           * (float) i / (float) n);
+                    data[i] = mono[at + i] * w;
+                }
+                fft.performFrequencyOnlyForwardTransform (data.data());
+
+                double sum = 0.0, high = 0.0;
+                for (size_t i = 1; i < n / 2; ++i)
+                {
+                    const auto e = (double) data[i] * data[i];
+                    sum += e;
+                    if ((double) i * sampleRate / (double) n > 2000.0)
+                        high += e;
+                }
+                loudestTotal = juce::jmax (loudestTotal, sum);
+                if (at >= skip)
+                    loudestHigh = juce::jmax (loudestHigh, high);
+            }
+            m.highSpike = (float) (loudestHigh / loudestTotal);
         }
         /*  Find the note by autocorrelation, over the part of the sound that
             actually has energy. A fixed window measures silence on a short patch
@@ -362,7 +454,7 @@ namespace audition
 
             // Autocorrelation over one window. Returns false when the window
             // holds nothing worth measuring.
-            const auto analyse = [&] (size_t from, size_t count,
+            const auto analyse = [&] (size_t from, size_t count, float top,
                                       float& hz, float& salience) -> bool
             {
                 if (count <= 2048 || from + count > mono.size())
@@ -382,17 +474,50 @@ namespace audition
                 if (zero <= 1.0e-12)
                     return false;
 
-                const auto minLag = (size_t) (sampleRate / 2000.0);
-                const auto maxLag = juce::jmin ((size_t) (sampleRate / 40.0), count / 2);
-                double bestScore = 0.0;
-                size_t bestLag = 0;
+                /*  `top` is the highest pitch worth looking for, and it is a
+                    trade. Two kilohertz keeps a bass on its fundamental, since
+                    a shorter lag correlates on waveform shape rather than
+                    period and one bass came back at 5880 Hz. But a sequence
+                    stepping several octaves up sounds above 2 kHz, and with the
+                    ceiling there every step returned the band edge instead: lag
+                    pinned to 22 samples, 2004.5 Hz, a quarter tone off the
+                    grid. That quarter tone was this number, not the patch.
 
-                for (size_t lag = minLag; lag < maxLag; ++lag)
+                    So the stepped path raises it and the whole note path does
+                    not.
+                */
+                const auto minLag = (size_t) (sampleRate / (double) top);
+                const auto maxLag = juce::jmin ((size_t) (sampleRate / 40.0), count / 2);
+                const auto scoreAt = [&] (size_t lag)
                 {
                     double sum = 0.0;
                     for (size_t i = 0; i + lag < count; ++i)
                         sum += (mono[from + i] - mean) * (mono[from + i + lag] - mean);
-                    const auto score = sum / zero;
+                    return sum / zero;
+                };
+
+                double bestScore = 0.0;
+                size_t bestLag = 0;
+
+                /*  Autocorrelation starts at one and falls away, and that
+                    opening slope is not a period. Taking the largest value in
+                    the band kept picking a lag on the slope, so the answer was
+                    whatever the band happened to start at: a bass came back at
+                    5880 Hz and a sequence's steps all read the band edge.
+
+                    Stepping past the descent first, so the peak that is found
+                    is a real one, put the bass back on its fundamental and took
+                    a sequence from a quarter tone off the grid to a fiftieth.
+                */
+                bool pastDescent = false;
+                for (size_t lag = minLag; lag < maxLag; ++lag)
+                {
+                    const auto score = scoreAt (lag);
+                    if (! pastDescent)
+                    {
+                        pastDescent = score <= 0.0;
+                        continue;
+                    }
                     if (score > bestScore)
                     {
                         bestScore = score;
@@ -400,11 +525,41 @@ namespace audition
                     }
                 }
 
+                // A signal that never decorrelates has no descent to step past,
+                // so fall back to the whole band rather than reporting nothing.
+                if (bestLag == 0)
+                {
+                    for (size_t lag = minLag; lag < maxLag; ++lag)
+                    {
+                        const auto score = scoreAt (lag);
+                        if (score > bestScore)
+                        {
+                            bestScore = score;
+                            bestLag = lag;
+                        }
+                    }
+                }
+
                 if (bestLag == 0)
                     return false;
 
+                /*  A whole sample of lag is a coarse unit up high: 0.77 of a
+                    semitone between lag 22 and 23. Fitting a parabola through
+                    the peak and its neighbours recovers the fraction, so a step
+                    that is in tune can measure as in tune.
+                */
+                auto refined = (double) bestLag;
+                if (bestLag > minLag && bestLag + 1 < count)
+                {
+                    const auto y1 = scoreAt (bestLag - 1), y2 = bestScore,
+                               y3 = scoreAt (bestLag + 1);
+                    const auto denom = y1 - 2.0 * y2 + y3;
+                    if (std::abs (denom) > 1.0e-12)
+                        refined += juce::jlimit (-0.5, 0.5, 0.5 * (y1 - y3) / denom);
+                }
+
                 salience = (float) juce::jlimit (0.0, 1.0, bestScore);
-                hz = (float) (sampleRate / (double) bestLag);
+                hz = (float) (sampleRate / refined);
                 return true;
             };
 
@@ -420,7 +575,7 @@ namespace audition
             const auto from = juce::jmin (loudest, mono.size() > span ? mono.size() - span : 0u);
             const auto count = juce::jmin (span, mono.size() - from);
 
-            if (analyse (from, count, m.pitchHz, m.pitchSalience))
+            if (analyse (from, count, 2000.0f, m.pitchHz, m.pitchSalience))
                 errorsFor (m.pitchHz, m.pitchErrorSemitones, m.pitchOffGridSemitones);
 
             /*  The same again, a step at a time. 0.09s is shorter than a
@@ -442,7 +597,7 @@ namespace audition
                         continue;   // between notes, or past the end of one
 
                     float hz = 0.0f, salience = 0.0f;
-                    if (! analyse (at, step, hz, salience))
+                    if (! analyse (at, step, 5000.0f, hz, salience))
                         continue;
 
                     float octaveError = 0.0f, offGrid = 0.0f;

@@ -33,6 +33,9 @@ namespace axes
             };
             bright.flip = { std::regex ("^filter_\\d_model$") };
             bright.enables = { "filter_1_on", "eq_on" };
+            // Both of these darken. BRIGHT needs them on at both ends: on to be
+            // dark at the bottom, and on to be shaped at the top.
+            bright.lowEndDisables = false;
             bright.macroDests = { "filter_1_cutoff", "filter_2_cutoff",
                                   "filter_fx_cutoff", "osc_1_spectral_morph_amount" };
             list.push_back (std::move (bright));
