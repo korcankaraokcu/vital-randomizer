@@ -120,8 +120,10 @@ fresh install is all it needs. Then:
 - **BRIGHT / MOVE / DIRT / SPACE** set the character, and **COMPLEX** sets how
   much of the synth a patch may use.
 - **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
-- **< >** walk the candidate history, **KEEP** stars one so rolling cannot lose
-  it, **EXPORT** writes a `.vital` file.
+- **< >** walk the candidate history and **KEEP** stars one so rolling cannot
+  lose it. Starred patches sit in the KEPT row: click to load, right click to
+  remove.
+- **EXPORT** writes the current patch to a `.vital` file.
 - **...** locates Vital if it moved.
 
 Everything saves with the DAW project, including the patch that was playing and
@@ -309,6 +311,18 @@ VST3 on Windows needs COM initialised on the calling thread and a bare worker
 thread does not have it. Generating and auditioning patches happen on a worker. The audio thread takes a try-lock, never a lock: a patch
 load holds it for a couple of hundred milliseconds, and going quiet for a moment
 beats stalling the whole DAW.
+
+**The next candidate is ready before it is asked for.** Screening is most of
+what a roll costs: every candidate is rendered, measured, and often rendered
+again to confirm its level, and filling a batch of 48 takes about 69 rolls. None
+of that has to happen after the button is pressed, because the recipe for the
+next roll is known the moment the last one lands. A roll now finishes by starting
+the next one on the worker, so the wait falls while the user is playing rather
+than after they ask.
+
+It carries a signature of the style, sliders and locks it was built from, and is
+thrown away the moment any of those move. A prepared patch that no longer matches
+the sliders is worse than no prepared patch at all.
 
 **History costs nothing.** A patch is around 856 KB and almost all of that is
 wavetable and sample data, but its 451 knobs are only 22 KB. A roll is fully

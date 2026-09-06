@@ -4,7 +4,7 @@
 
 namespace
 {
-    constexpr int kStripHeight = 104;
+    constexpr int kStripHeight = 130;
     constexpr int kMinWidth = 900;
 
     const juce::Colour kBack       { 0xff141619 };
@@ -29,6 +29,73 @@ namespace
 }
 
 // ------------------------------------------------------------- filmstrip ---
+
+void KeeperRack::setContents (const std::vector<juce::String>& labels)
+{
+    if (labels != names)
+    {
+        names = labels;
+        repaint();
+    }
+}
+
+int KeeperRack::cellAt (int x) const
+{
+    if (names.empty())
+        return -1;
+    const auto cellWidth = getWidth() / (int) juce::jmax (size_t (8), names.size());
+    const auto index = x / juce::jmax (1, cellWidth);
+    return index < (int) names.size() ? index : -1;
+}
+
+void KeeperRack::paint (juce::Graphics& g)
+{
+    g.fillAll (kPanel);
+
+    if (names.empty())
+    {
+        g.setColour (kTextDim);
+        g.setFont (11.0f);
+        g.drawText ("nothing kept yet, hit KEEP on one you like", getLocalBounds(),
+                    juce::Justification::centredLeft);
+        return;
+    }
+
+    // Room for eight even when fewer are kept, so the cells do not resize
+    // under the pointer every time one is added.
+    const auto cellWidth = getWidth() / (int) juce::jmax (size_t (8), names.size());
+
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        auto cell = juce::Rectangle<int> ((int) i * cellWidth, 0, cellWidth,
+                                          getHeight()).reduced (2, 2);
+        g.setColour (kAccentWarm.withAlpha (0.28f));
+        g.fillRoundedRectangle (cell.toFloat(), 3.0f);
+        g.setColour (kAccentWarm);
+        g.setFont (11.0f);
+        g.drawText (juce::String ((int) i + 1) + "  " + names[i], cell.reduced (5, 0),
+                    juce::Justification::centredLeft, true);
+    }
+}
+
+void KeeperRack::mouseDown (const juce::MouseEvent& e)
+{
+    const auto index = cellAt (e.x);
+    if (index < 0)
+        return;
+
+    // Right click removes, because a keeper rack whose only action is load is
+    // one that fills up and stays full.
+    if (e.mods.isPopupMenu())
+    {
+        if (onRemove)
+            onRemove (index);
+    }
+    else if (onRecall)
+    {
+        onRecall (index);
+    }
+}
 
 void Filmstrip::setContents (int newCount, int newCursor)
 {
@@ -222,6 +289,16 @@ VitalRandomizerEditor::VitalRandomizerEditor (VitalRandomizerProcessor& p)
     };
     addAndMakeVisible (filmstrip);
 
+    keeperRack.onRecall = [this] (int index) { proc.recallKeeper ((size_t) index); };
+    keeperRack.onRemove = [this] (int index) { proc.unstar ((size_t) index); };
+    keeperRack.setTooltip ("Click to load a kept patch, right click to remove it");
+    addAndMakeVisible (keeperRack);
+
+    keeperLabel.setText ("KEPT", juce::dontSendNotification);
+    keeperLabel.setColour (juce::Label::textColourId, kTextDim);
+    keeperLabel.setFont (juce::FontOptions (11.0f));
+    addAndMakeVisible (keeperLabel);
+
     statusLabel.setColour (juce::Label::textColourId, kTextDim);
     statusLabel.setFont (juce::FontOptions (11.0f));
     addAndMakeVisible (statusLabel);
@@ -325,6 +402,14 @@ void VitalRandomizerEditor::refreshFromProcessor()
 
     if (styleBox.getNumItems() == 0)
         refreshStyles();
+
+    {
+        std::vector<juce::String> kept;
+        for (const auto& keeper : proc.candidates().keepers())
+            kept.push_back (juce::String (keeper.label).upToFirstOccurrenceOf (" ", false, false)
+                            + (keeper.edited ? "*" : ""));
+        keeperRack.setContents (kept);
+    }
 
     for (auto& control : axisControls)
     {
@@ -461,6 +546,11 @@ void VitalRandomizerEditor::resized()
     starButton.setBounds (midRow.removeFromLeft (60).reduced (2, 0));
     midRow.removeFromLeft (10);
     filmstrip.setBounds (midRow.reduced (2, 1));
+
+    strip.removeFromTop (5);
+    auto keeperRow = strip.removeFromTop (22);
+    keeperLabel.setBounds (keeperRow.removeFromLeft (36));
+    keeperRack.setBounds (keeperRow.reduced (2, 0));
 
     strip.removeFromTop (4);
     auto bottomRow = strip;

@@ -191,6 +191,22 @@ void VitalRandomizerProcessor::run()
             case Job::vary:
             case Job::recall:
             case Job::reloadCurrent:   performRoll (job); break;
+            case Job::prefetch:
+            {
+                /*  Built with the settings as they stand now. If they move
+                    before the user rolls, the signature stops matching and it
+                    is thrown away rather than handed over as a stale patch.
+                */
+                const auto signature = requestSignature();
+                auto ready = rollScreened (Job::rollNew);
+                if (ready.ok)
+                {
+                    const juce::ScopedLock sl (prefetchLock);
+                    prefetched = std::move (ready);
+                    prefetchedFor = signature;
+                }
+                break;
+            }
             default: break;
         }
     }
@@ -242,17 +258,61 @@ void VitalRandomizerProcessor::performRoll (Job job)
     }
     else
     {
-        /*  Roll until something worth hearing comes out.
-
-            Screening is the difference between a randomizer and a slot machine.
-            A generated patch can be silent, all click and no body, or 20 dB
-            hotter than the last one, and none of that is worth spending the
-            user's attention on when the offline instance can find it in a
-            quarter of a second and roll again.
+        /*  A candidate prepared while the user was listening to the last one,
+            if the settings have not moved since it was built.
         */
-        // Screening got stricter as the style rules got tighter, so more of the
-        // rolls get thrown away. A rejected candidate costs a fraction of a
-        // second on a worker thread, and a bad one costs the user's attention.
+        if (job == Job::rollNew)
+        {
+            const juce::ScopedLock sl (prefetchLock);
+            if (prefetched.ok && prefetchedFor == requestSignature())
+            {
+                result = std::move (prefetched);
+                prefetched = {};
+                prefetchedFor.clear();
+            }
+        }
+
+        if (! result.ok)
+            result = rollScreened (job);
+    }
+
+    if (! result.ok)
+    {
+        errorText = juce::String (result.error);
+        setStatus ("Roll failed", -1.0f, false);
+        sendChangeMessage();
+        return;
+    }
+
+    applyResult (result, job == Job::rollNew || job == Job::vary);
+
+    // Start on the next one straight away, so the wait lands while the user is
+    // playing this one rather than after they ask for another.
+    if (job == Job::rollNew || job == Job::vary)
+    {
+        const juce::ScopedLock sl (jobLock);
+        if (pendingJob == Job::none)
+            pendingJob = Job::prefetch;
+        wakeUp.signal();
+    }
+}
+
+gen::Result VitalRandomizerProcessor::rollScreened (Job job)
+{
+    gen::Result result;
+
+    /*  Roll until something worth hearing comes out.
+
+        Screening is the difference between a randomizer and a slot machine.
+        A generated patch can be silent, all click and no body, or 20 dB
+        hotter than the last one, and none of that is worth spending the
+        user's attention on when the offline instance can find it in a
+        quarter of a second and roll again.
+    */
+    // Screening got stricter as the style rules got tighter, so more of the
+    // rolls get thrown away. A rejected candidate costs a fraction of a
+    // second on a worker thread, and a bad one costs the user's attention.
+    {
         constexpr int maxAttempts = 8;
         audition::Measurement measured;
         gen::Result best;
@@ -301,15 +361,25 @@ void VitalRandomizerProcessor::performRoll (Job job)
         }
     }
 
-    if (! result.ok)
-    {
-        errorText = juce::String (result.error);
-        setStatus ("Roll failed", -1.0f, false);
-        sendChangeMessage();
-        return;
-    }
+    return result;
+}
 
-    applyResult (result, job == Job::rollNew || job == Job::vary);
+juce::String VitalRandomizerProcessor::requestSignature() const
+{
+    const juce::ScopedLock sl (settingsLock);
+    juce::String s = currentStyle;
+    for (const auto& slider : sliders)
+        s << "|" << slider.first << "=" << juce::String (slider.second, 3);
+    for (const auto& lock : locks)
+        s << "|L" << (int) lock;
+    return s;
+}
+
+void VitalRandomizerProcessor::dropPrefetch()
+{
+    const juce::ScopedLock sl (prefetchLock);
+    prefetched = {};
+    prefetchedFor.clear();
 }
 
 bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measurement& measured)
@@ -537,14 +607,18 @@ void VitalRandomizerProcessor::setStyle (const juce::String& s)
     if (changed)
     {
         applyStyleDefaults (s);
+        dropPrefetch();
         sendChangeMessage();
     }
 }
 
 void VitalRandomizerProcessor::setSlider (const juce::String& axis, float value)
 {
-    const juce::ScopedLock sl (settingsLock);
-    sliders[axis] = juce::jlimit (0.0f, 1.0f, value);
+    {
+        const juce::ScopedLock sl (settingsLock);
+        sliders[axis] = juce::jlimit (0.0f, 1.0f, value);
+    }
+    dropPrefetch();
 }
 
 float VitalRandomizerProcessor::slider (const juce::String& axis) const
@@ -556,6 +630,7 @@ float VitalRandomizerProcessor::slider (const juce::String& axis) const
 
 void VitalRandomizerProcessor::setLocked (schema::Section section, bool locked)
 {
+    dropPrefetch();
     const juce::ScopedLock sl (settingsLock);
     if (locked)
         locks.insert (section);

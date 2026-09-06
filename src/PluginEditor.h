@@ -29,6 +29,29 @@ private:
     int count = 0, cursor = -1;
 };
 
+/*
+    The starred patches, one numbered cell each.
+
+    Drawn rather than built out of buttons for the same reason the filmstrip is:
+    the count changes every time somebody stars something, and rebuilding a row
+    of child components on every change is more machinery than a row of numbers
+    deserves. Clicking one loads it, right clicking removes it.
+*/
+class KeeperRack : public juce::Component,
+                   public juce::SettableTooltipClient
+{
+public:
+    std::function<void (int)> onRecall, onRemove;
+
+    void setContents (const std::vector<juce::String>& labels);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    int cellAt (int x) const;
+    std::vector<juce::String> names;
+};
+
 class VitalRandomizerEditor : public juce::AudioProcessorEditor,
                               private juce::ChangeListener,
                               private juce::Timer
@@ -80,6 +103,8 @@ private:
     juce::Slider varyDepth;
 
     Filmstrip filmstrip;
+    KeeperRack keeperRack;
+    juce::Label keeperLabel;
     juce::Label statusLabel;
     juce::Label macroLabel;
 

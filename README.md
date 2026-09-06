@@ -32,7 +32,7 @@ Grab the latest build from the [releases page](../../releases) and put
 | macOS | `~/Library/Audio/Plug-Ins/VST3` |
 | Linux | `~/.vst3` |
 
-Rescan plugins in your DAW.
+Then rescan plugins in your DAW.
 
 ## Using it
 
@@ -45,8 +45,11 @@ Rescan plugins in your DAW.
 - **VARY** drifts the current patch instead of replacing it, with the small
   slider beside it setting how far.
 - **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
-- **&lt; &gt;** walk the candidate history, **KEEP** stars one, **EXPORT** writes
-  a `.vital` file.
+- **&lt; &gt;** walk the candidate history and **KEEP** stars one. Starred
+  patches sit in the KEPT row: click one to load it, right click to remove it.
+  A star holds the patch as it stands, so anything you changed by hand in
+  Vital's own GUI is kept too.
+- **EXPORT** writes the current patch to a `.vital` file.
 - **...** locates Vital if it moved.
 
 Everything saves with the DAW project, including the patch that was playing.

@@ -24,7 +24,7 @@ class VitalRandomizerProcessor : public juce::AudioProcessor,
                                  private juce::Thread
 {
 public:
-    enum class Job { none, rollNew, vary, recall, reloadCurrent };
+    enum class Job { none, rollNew, vary, recall, reloadCurrent, prefetch };
 
     struct Status
     {
@@ -104,6 +104,12 @@ private:
     void run() override;
     void enqueue (Job job);
     void performRoll (Job job);
+    /** Generate and screen until something passes. The slow half of a roll,
+        and the half that can be done before the user asks for it. */
+    gen::Result rollScreened (Job job);
+    /** What a prefetched candidate has to still match to be usable. */
+    juce::String requestSignature() const;
+    void dropPrefetch();
     void setStatus (const juce::String& message, float progress, bool working);
     void applyResult (gen::Result& result, bool pushToHistory);
     gen::Request buildRequest() const;
@@ -129,6 +135,23 @@ private:
     juce::CriticalSection jobLock;
     Job pendingJob = Job::none;
     size_t pendingKeeper = 0;
+
+    /*  The next candidate, generated while the user is still listening to this
+        one.
+
+        Screening is most of what a roll costs: every candidate is rendered,
+        measured, and often rendered again to confirm its level, and a batch of
+        48 takes about 69 rolls to fill. None of that has to happen after the
+        button is pressed, because the recipe for the next roll is known as soon
+        as the last one lands.
+
+        It is only usable while the settings it was built from still hold, so it
+        carries a signature and is dropped whenever the style, a slider or a lock
+        moves under it.
+    */
+    juce::CriticalSection prefetchLock;
+    gen::Result prefetched;
+    juce::String prefetchedFor;
 
     juce::String currentStyle { "Bass" };
     juce::CriticalSection settingsLock;
