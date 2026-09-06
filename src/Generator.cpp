@@ -575,6 +575,74 @@ namespace gen
         }
     }
 
+    void Generator::scaleModulationDepth (const Request& r, nlohmann::json& settings)
+    {
+        /*  MOVE, applied to how far each modulation reaches.
+
+            It already sets the rate of the modulators and how many of them are
+            wired, and neither is the same as how much they move anything. A
+            patch with four fast LFOs at shallow depths sits nearly still, which
+            is why the slider was the weakest of the four: pushed to the top it
+            changed the tone of a patch less than half the time on a lead.
+
+            Depth is scaled rather than set, so the shape the archetype designed
+            survives and only its reach changes.
+        */
+        if (r.locks.count (schema::Section::mod) > 0
+            || ! settings.contains ("modulations") || ! settings["modulations"].is_array())
+            return;
+
+        const auto move = r.sliders.count ("move") > 0 ? r.sliders.at ("move") : 0.5f;
+        const auto scale = juce::jmap (move, 0.0f, 1.0f, 0.55f, 1.45f);
+
+        auto& mods = settings["modulations"];
+        for (size_t i = 0; i < mods.size(); ++i)
+        {
+            if (modSource (mods[i]).empty())
+                continue;
+            const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
+            const auto amount = (float) settings.value (key, 0.0);
+            settings[key] = juce::jlimit (-1.0f, 1.0f, amount * scale);
+        }
+    }
+
+    void Generator::keepStruckNotesStruck (const Request& r, nlohmann::json& settings)
+    {
+        /*  A struck note has to stop while the key is still down.
+
+            Setting the amp envelope's sustain to zero is not enough on its own.
+            An LFO wired to an oscillator's level pushes it back up a moment
+            later, and the note swells again with the key still held: one patch
+            doing exactly that measured a rising envelope two seconds in. The
+            screen catches it, and catching it means rolling the whole patch
+            again, so it was the commonest reason a bass was thrown away.
+
+            Envelopes are left alone, because an envelope decays and a bass with
+            its filter closing is the sound. It is the cyclic sources that have
+            no end.
+        */
+        if (r.style != "Bass" && r.style != "Percussion")
+            return;
+        if (r.locks.count (schema::Section::mod) > 0
+            || ! settings.contains ("modulations") || ! settings["modulations"].is_array())
+            return;
+
+        static const std::regex level (R"(^(osc_\d_level|sample_level|volume)$)");
+
+        auto& mods = settings["modulations"];
+        for (auto& slot : mods)
+        {
+            const auto source = modSource (slot);
+            if (source.empty() || ! std::regex_match (modDest (slot), level))
+                continue;
+            if (source.rfind ("lfo_", 0) != 0 && source.rfind ("random_", 0) != 0)
+                continue;
+
+            slot["source"] = "";
+            slot["destination"] = "";
+        }
+    }
+
     // -------------------------------------------------------------- routing ---
 
     void Generator::wireRouting (const archetype::Archetype& a, const Request& r,
@@ -992,6 +1060,8 @@ namespace gen
         if (r.base == nullptr)
             wireRouting (*style, r, settings, srng);
         wireMacros (r, result.preset, settings, result);
+        scaleModulationDepth (r, settings);
+        keepStruckNotesStruck (r, settings);
         applyNoteShape (r, settings, prng);
         constrainPitch (r, settings, srng);
         result.repairs = repair (settings);

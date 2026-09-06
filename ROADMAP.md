@@ -4,44 +4,42 @@ Open work, roughly in the order I would do it. Anything measured is measured, so
 the numbers here come from `vrtest` and from rendering through Vital rather than
 from impressions.
 
-## 1. The screen has become very permissive
+## 1. The reject count is too noisy to judge a change by
 
-48 of 49 rolls now pass, where it used to be 48 of 69. Most of that is a screen
-that was wrong rather than one that has gone soft: the brightness check was
-counting spectral bins instead of energy and throwing away basses for having a
-little air on them. But 98% means almost nothing is being caught, and the value
-of the screen was always that it spends a machine's attention instead of yours.
+Five runs of the same code, six patches a style, gave between 19 and 61 rejected
+candidates, and bass was thrown out for droning between 0 and 18 times. One run
+filled every slot without a single reject and the next needed nine goes at one
+bass.
 
-What still fires is worth keeping (a note that keeps going, a level that will not
-settle, a patch playing the wrong note), so this is not broken. It wants a listen
-to a full batch to say whether anything unusable is now getting through, and if
-nothing is, the thresholds that no longer fire could go rather than sit there
-looking like protection.
+The 48 presets a run keeps are fine. It is the count of what it threw away
+getting there that swings, and that range is wider than most of the changes
+anybody would want to test, so the tally cannot tell a real improvement from a
+lucky run. It was very nearly used that way twice today. The style summary is steadier, because it
+averages over what got through rather than counting rare events, but anything
+event shaped needs far more patches than a listening batch wants to be.
 
-## 2. A bass that keeps going is the commonest rejection left
+`--per-style=16` exists and takes about an hour. Something that fills a batch and
+keeps rolling for statistics without writing 128 files would be better.
 
-Ten of the nineteen rejections in the last batch, and the largest single reason.
-Down from 44 once brightness stopped dominating, so the picture is better than it
-was, but it is now the thing bass fails on.
+## 2. A bass that keeps going, when it happens
 
-The check measures late energy against early energy with the key still held, and
-the basses that get through are clean (0.16 held, 0.00 tail), so this is the
-generator making basses that drone rather than the screen misjudging. A filter
-envelope with somewhere left to go and the effects tail are the likely causes,
-and COMPLEX turns up both.
+The cause named in the notes is closed: a cyclic source wired to an oscillator's
+level pushed the note back up with the key still down, and bass and percussion
+now drop those routings. Verified structurally, 0 of 6 in a batch where it used
+to be 1 of 6.
 
-## 3. The axes are measured on a number that just changed
+Whether that fixed the rejections cannot be told from the batches, per item 1.
+The accepted basses are clean, sustain at zero and no tail, so if there is
+anything left it is most likely the decay sitting at the top of its 1.08 to 1.30
+band and lasting long enough to trip the held note check.
 
-`vrtest --axis=bright --trials=32` now reports 97% agreement overall, with five
-styles at 100% and SFX and Experiment at 90%. It read 73% a day ago.
+## 3. DIRT is scored on a number that may not be measuring it
 
-Part of that is a real fix, an axis that had been switching its own filter off at
-its dark end. The rest is that the test scores itself on the centroid, and the
-centroid was counting spectral bins rather than energy, so the yardstick was
-noisy in the same way the brightness check was wrong. There is nothing left to
-chase on BRIGHT.
+Agreement by axis: BRIGHT 97%, SPACE 93%, MOVE 77%, DIRT 72%.
 
-The other three axes have never been measured this way. DIRT, SPACE and MOVE were
-scored once by hand, against the old centroid, and the test now takes any axis
-key. Scoring them properly is a few minutes and would say whether the 90% and 80%
-they were credited with mean anything.
+DIRT is scored on crest, on the reasoning that distortion fills in the gap
+between peak and average. That is true, and the level matching pass also changes
+peak against average, so the number may be reading the loudness correction rather
+than the axis. Three metrics turned out to be measuring the wrong thing in a
+single day, so this one deserves the same suspicion before anybody concludes the
+axis is weak. High harmonic energy or spectral flatness would settle it.

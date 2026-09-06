@@ -13,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -288,8 +289,49 @@ int main (int argc, char** argv)
     */
     if (axisKey.isNotEmpty())
     {
+        /*  Each axis needs the number that says whether it did its job, and
+            they are not the same number.
+
+            BRIGHT moves where the energy sits. SPACE leaves sound behind after
+            the key is released, so it shows in the tail rather than in the note.
+            MOVE is the envelope refusing to sit still. DIRT drives the signal
+            into distortion, which fills in the gap between peak and average, so
+            its number goes down as the slider goes up.
+
+            Scoring all four on the centroid, which is what happened before this
+            existed, only ever measured brightness.
+        */
+        struct Metric
+        {
+            const char* label;
+            bool higherIsMore;
+            std::function<float (const audition::Measurement&)> of;
+        };
+
+        const std::map<juce::String, Metric> metrics = {
+            { "bright", { "energy centroid, Hz", true,
+                          [] (const audition::Measurement& m) { return m.centroidHz; } } },
+            { "space",  { "tail against note, %", true,
+                          [] (const audition::Measurement& m)
+                          { return m.rms > 1.0e-6f ? 100.0f * m.tailRms / m.rms : 0.0f; } } },
+            { "move",   { "tone motion, %", true,
+                          [] (const audition::Measurement& m)
+                          { return 100.0f * m.spectralMotion; } } },
+            { "dirt",   { "crest, dB (falls as it rises)", false,
+                          [] (const audition::Measurement& m) { return m.crestDb; } } },
+        };
+
+        const auto found = metrics.find (axisKey);
+        if (found == metrics.end())
+        {
+            std::cout << "no metric for axis " << axisKey
+                      << ". Known: bright, dirt, space, move" << std::endl;
+            return 1;
+        }
+        const auto metric = found->second;
         std::cout << "\n" << axisKey << ": the same patch built low and high, "
                   << trials << " seeds per style\n" << std::endl;
+        std::cout << "scored on " << metric.label << "\n" << std::endl;
         std::cout << juce::String ("style").paddedRight (' ', 12)
                   << juce::String ("agreement").paddedRight (' ', 12)
                   << "median move" << std::endl;
@@ -304,7 +346,7 @@ int main (int argc, char** argv)
             for (int t = 0; t < trials; ++t)
             {
                 const auto seed = (unsigned int) (0x51ED0000u + (unsigned int) t * 2654435761u) | 1u;
-                float centroid[2] = { 0.0f, 0.0f };
+                float value[2] = { 0.0f, 0.0f };
                 bool ok = true;
 
                 for (int side = 0; side < 2 && ok; ++side)
@@ -327,19 +369,21 @@ int main (int argc, char** argv)
                     }
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
                     const auto m = audition::audition (*host.processor(), kSampleRate, kBlockSize);
-                    if (! m.usable() || m.centroidHz <= 0.0f)
+                    if (! m.usable())
                         ok = false;
                     else
-                        centroid[side] = m.centroidHz;
+                        value[side] = metric.of (m);
                 }
 
                 if (! ok)
                     continue;
 
                 ++tested;
-                if (centroid[1] > centroid[0])
+                const auto delta = metric.higherIsMore ? value[1] - value[0]
+                                                       : value[0] - value[1];
+                if (delta > 0.0f)
                     ++agreed;
-                moves.push_back (centroid[1] - centroid[0]);
+                moves.push_back (delta);
             }
 
             agreedAll += agreed;
@@ -349,7 +393,7 @@ int main (int argc, char** argv)
             std::cout << styleName.paddedRight (' ', 12)
                       << (tested > 0 ? juce::String (100 * agreed / tested) + "%"
                                      : juce::String ("-")).paddedRight (' ', 12)
-                      << juce::String (median, 0) << " Hz" << std::endl;
+                      << juce::String (median, 1) << std::endl;
         }
 
         std::cout << "\noverall " << (testedAll > 0 ? 100 * agreedAll / testedAll : 0)

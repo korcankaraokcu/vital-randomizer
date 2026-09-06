@@ -403,6 +403,7 @@ namespace audition
             juce::dsp::FFT fft (11);
             const auto n = (size_t) 1 << 11;
             double loudestTotal = 1.0e-12, loudestHigh = 0.0;
+            std::vector<double> centroids;
 
             for (size_t at = 0; at + window < mono.size(); at += window / 2)
             {
@@ -415,19 +416,41 @@ namespace audition
                 }
                 fft.performFrequencyOnlyForwardTransform (data.data());
 
-                double sum = 0.0, high = 0.0;
+                double sum = 0.0, high = 0.0, weighted = 0.0;
                 for (size_t i = 1; i < n / 2; ++i)
                 {
                     const auto e = (double) data[i] * data[i];
+                    const auto hz = (double) i * sampleRate / (double) n;
                     sum += e;
-                    if ((double) i * sampleRate / (double) n > 2000.0)
+                    weighted += e * hz;
+                    if (hz > 2000.0)
                         high += e;
                 }
                 loudestTotal = juce::jmax (loudestTotal, sum);
                 if (at >= skip)
                     loudestHigh = juce::jmax (loudestHigh, high);
+
+                // Only windows with something in them. A silent tail has no
+                // colour to speak of and would read as wild movement.
+                if (sum > 1.0e-9)
+                    centroids.push_back (weighted / sum);
             }
             m.highSpike = (float) (loudestHigh / loudestTotal);
+
+            if (centroids.size() > 2)
+            {
+                double mean = 0.0;
+                for (const auto c : centroids)
+                    mean += c;
+                mean /= (double) centroids.size();
+
+                double var = 0.0;
+                for (const auto c : centroids)
+                    var += (c - mean) * (c - mean);
+                var /= (double) centroids.size();
+
+                m.spectralMotion = mean > 1.0e-6 ? (float) (std::sqrt (var) / mean) : 0.0f;
+            }
         }
         /*  Find the note by autocorrelation, over the part of the sound that
             actually has energy. A fixed window measures silence on a short patch

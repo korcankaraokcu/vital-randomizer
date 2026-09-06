@@ -52,6 +52,16 @@ namespace audition
         */
         float lowRatio = 0.0f;
         float highSpike = 0.0f;
+
+        /*  How much the tone moves, as opposed to how much the level does.
+
+            `motion` above measures the envelope, which is the wrong question for
+            a patch whose movement is a filter sweeping. Most of what MOVE wires
+            goes to cutoff, so the sound changes colour while its loudness sits
+            still. This is the spread of the centroid across the note against its
+            mean, so a patch that sweeps reads high and a static one reads zero.
+        */
+        float spectralMotion = 0.0f;
         /*  Late energy against early energy, with the note still held.
 
             Whether a note keeps going is not something the sustain parameter

@@ -478,6 +478,42 @@ which is under the 0.26 that the worst patch anybody called good measures at.
 
 ## What a slider is worth
 
+`vrtest --axis=<key> --trials=N` builds the same patch twice from one seed, once
+with the slider low and once high, and asks whether the sound moved the way the
+slider says it should. One seed means only the axis differs.
+
+Each axis needs the number that says whether it did its job, and they are not the
+same number. Scoring all four on the centroid, which is what happened before this
+existed, only ever measured brightness.
+
+| axis | scored on | agreement |
+|---|---|---|
+| BRIGHT | energy centroid | 97% |
+| SPACE | tail against the note | 93% |
+| MOVE | how far the centroid wanders | 77% |
+| DIRT | crest, which falls as drive rises | 72% |
+
+It caught BRIGHT arguing with itself. An axis switches its effects on when pushed
+and off at the other end, which is right where the effect adds the quality the
+axis is named for: no reverb is less space. A filter is the opposite, the thing
+that takes brightness away, so switching it off at low BRIGHT made the patch
+brighter. Leaving it on at both ends was worth twelve points.
+
+MOVE took two goes. Measured on the envelope it read 63% with bass and percussion
+moving the wrong way, which is what a metric error looks like: MOVE wires
+modulation to cutoff, so it moves tone rather than loudness, and on tone motion
+the inversions disappeared. The gap that was left was real. MOVE set the rate of
+the modulators and how many were wired and never how far they reached, and four
+fast LFOs at shallow depths sit nearly still, so it scales depth now as well.
+
+Two lessons came out of the measuring rather than the fixes. Sixteen trials is
+not enough to tune on: an attempt that looked like a clear win at sixteen was a
+regression at forty eight. And a failure with a shape is a failure worth
+chasing, since it was the -0.75 correlation between agreement and how open a
+style's filter already sat that pointed at the enables.
+
+
+
 `vrtest --axis=bright --trials=32` builds the same patch twice from one seed,
 once with the slider low and once high, and asks whether the sound moved the way
 the slider says it should. One seed means only the axis differs.
