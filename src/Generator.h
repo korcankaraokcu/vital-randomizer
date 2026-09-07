@@ -85,6 +85,7 @@ namespace gen
                          nlohmann::json& settings, Result& result);
         void constrainPitch (const Request& r, nlohmann::json& settings, std::mt19937& rng);
         void scaleModulationDepth (const Request& r, nlohmann::json& settings);
+        void tameDriveModulation (nlohmann::json& settings);
         void keepStruckNotesStruck (const Request& r, nlohmann::json& settings);
         std::vector<std::string> repair (nlohmann::json& settings);
 

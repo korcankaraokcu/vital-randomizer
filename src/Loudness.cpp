@@ -18,7 +18,19 @@ namespace loudness
 
         // Under a dB of correction is not worth making. Chasing it just means
         // every patch gets nudged for no audible reason.
-        constexpr float kDeadband = 1.0f;
+        /*  Wide enough to clear the scatter in the thing being measured.
+
+            Vital randomises unison phase at every note on and its modulators
+            run free, so the same patch rendered three times reads three
+            different levels: one pad measured 0.143, 0.112 and 0.099, a spread
+            near 3 dB. Against a deadband of one, the correction could never
+            settle, and running out of passes was the commonest single reason a
+            candidate was thrown away.
+
+            Two is above the scatter on most patches and still inside the band a
+            listener would call level.
+        */
+        constexpr float kDeadband = 2.0f;
 
         float interp (const std::array<float, 9>& xs, const std::array<float, 9>& ys, float x)
         {

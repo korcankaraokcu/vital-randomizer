@@ -632,6 +632,39 @@ namespace gen
         }
     }
 
+    void Generator::tameDriveModulation (nlohmann::json& settings)
+    {
+        /*  Drive is not a destination to swing hard or quickly.
+
+            MOVE raises the rate of the modulators and wires them at the drive
+            at the same time, and a fast LFO on a distortion drive is not
+            movement, it is the patch tearing. Depth is capped, and anything
+            cyclic aimed at it is slowed to something that reads as the sound
+            breathing rather than stuttering.
+        */
+        if (! settings.contains ("modulations") || ! settings["modulations"].is_array())
+            return;
+
+        auto& mods = settings["modulations"];
+        for (size_t i = 0; i < mods.size(); ++i)
+        {
+            const auto source = modSource (mods[i]);
+            if (source.empty() || modDest (mods[i]) != "distortion_drive")
+                continue;
+
+            const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
+            const auto amount = (float) settings.value (key, 0.0);
+            settings[key] = juce::jlimit (-0.35f, 0.35f, amount);
+
+            if (source.rfind ("lfo_", 0) == 0)
+            {
+                const auto rate = source + "_frequency";
+                if (settings.contains (rate) && settings[rate].get<float>() > 0.5f)
+                    settings[rate] = 0.5f;
+            }
+        }
+    }
+
     void Generator::keepStruckNotesStruck (const Request& r, nlohmann::json& settings)
     {
         /*  A struck note has to stop while the key is still down.
@@ -1088,6 +1121,7 @@ namespace gen
         wireMacros (r, result.preset, settings, result);
         scaleModulationDepth (r, settings);
         keepStruckNotesStruck (r, settings);
+        tameDriveModulation (settings);
         applyNoteShape (r, settings, prng);
         constrainPitch (r, settings, srng);
         result.repairs = repair (settings);

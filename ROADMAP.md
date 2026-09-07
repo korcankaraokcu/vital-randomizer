@@ -4,50 +4,62 @@ Open work, roughly in the order I would do it. Anything measured is measured, so
 the numbers here come from `vrtest` and from rendering through Vital rather than
 from impressions.
 
-## 1. A level that will not settle is now the commonest rejection
+## 1. The sampler is one fixed sound and it is the wrong one
 
-Forty four of the ninety rejections in a 240 roll run, spread across every style,
-and the largest single reason in six of the eight. SFX is the worst at fifteen.
+Every patch that uses the sample slot gets Vital's own white noise. Only its
+level, routing and transpose vary, so a layer meant to add character adds the
+same flat hiss to everything, and because white noise is flat to the top of the
+range it costs far more brightness than it buys.
 
-It means the level matching ran its three passes and the patch still was not
-where it was aimed. That is a patch whose loudness depends on something the
-correction cannot reach, most likely a compressor or a limiter in its own chain
-responding to the master volume rather than tracking it. Worth finding out
-whether those patches are unusable or merely uncalibrated, because if it is the
-latter they are being thrown away for a bookkeeping failure.
+It showed up in listening. Keys patches measuring 7 kHz and up were called too
+bright, and muting the noise turned them into ordinary presets: the oscillators
+were never the problem. The level is capped lower for now, which treats the
+symptom.
 
-## 2. Keys and lead are still throwing away bright candidates
+What it wants is content. Vital reads a sample as plain audio in the preset, so
+the generator could synthesise one the way it already synthesises wavetables:
+filtered noise bursts, struck and scraped textures, short tuned bodies. That is
+the same argument the wavetables won, and the sample slot never got it.
 
-Eleven each per 240 rolls, and now the only style rule that fires in any number.
-The ceilings were recalibrated when the centroid started measuring energy, but
-they were set from a p90 of fourteen hand-made presets a style, which is a thin
-sample to draw a hard line from.
+## 2. Keys still throws away eight bright candidates in thirty
 
-`--rejects=<dir>` writes what the screen discarded with its reading in the name,
-which is how the bass ceiling turned out to be wrong. The same listen would say
-whether these two are.
+Down from seventeen once the ceiling was raised, and lead is down from twelve to
+three, but keys is still the style that fails most often on its own style rule.
 
-## 3. DIRT is the weakest axis and neither metric measures it well
+The ones inside 30% of the old ceiling were all played and none sounded wrong,
+which is why the line moved. What has not been listened to is the other side:
+keys still rejects at four times its ceiling. Somewhere between 30% over, which
+is fine, and 400% over, which is presumably not, there is a real edge, and only
+listening will find it. The same `--rejects=<dir>` and a set built from the
+middle of that range would say where.
 
-Agreement by axis: BRIGHT 97%, SPACE 93%, MOVE 77%, DIRT 72%.
+## 3. A sequence on the wrong note
+
+Five of the last thirty sequence rolls, and the largest reason left for that
+style. A sequence is allowed to sit on any semitone, so failing `wrong note`
+means it landed between two, which is the one thing the square stepped LFO and
+the transpose quantiser are supposed to make impossible.
+
+Worth finding whether the pitch is genuinely off grid or whether the reading is,
+given how many measurements turned out to be the thing at fault this week.
+
+## 4. DIRT is the weakest axis and neither metric measures it well
+
+Agreement by axis: BRIGHT 97%, SPACE 93%, MOVE 77%, DIRT 72% over 316 pairs.
 
 DIRT is scored on crest, on the reasoning that distortion fills in the gap
 between peak and average. The level matching also changes peak against average,
 so that number was suspect, and spectral flatness was tried instead as something
 the loudness correction cannot touch. It scored 59%, worse, with percussion
-inverted at 20%.
+inverted at 20%. Crest stays.
 
-So crest stays, and the honest reading is that DIRT is genuinely the weakest of
-the four rather than mismeasured. Where it fails is worth noting, because it is
-not spread evenly (40 trials a style, 316 pairs):
+Where it fails is not spread evenly:
 
 | Percussion | Bass | Lead | Experiment | SFX | Keys | Pad | Sequence |
 |---|---|---|---|---|---|---|---|
 | 97% | 87% | 80% | 66% | 65% | 62% | 61% | 60% |
 
 It works on the styles whose crest is low to begin with and fails on the ones
-that are already dense, which is itself a hint that the metric is reading the
-signal rather than the drive. Both attempts are recorded here so neither gets
-tried again. What would settle it is a metric built from what DIRT actually
-drives, the energy that distortion adds between the harmonics, rather than a
-whole signal statistic that other stages also move.
+already dense, which hints the metric reads the signal rather than the drive.
+What would settle it is a measure built from what DIRT actually does, the energy
+distortion adds between the harmonics.

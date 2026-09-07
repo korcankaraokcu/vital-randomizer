@@ -561,6 +561,18 @@ int main (int argc, char** argv)
 
                         if (rejectsTo != juce::File())
                         {
+                            /*  Levelled before it is written.
+
+                                A candidate is screened for its style before the
+                                loudness pass runs, so a rejected patch saved as
+                                it stands is several dB hotter than anything that
+                                passed. Handed over that way, two of them were
+                                called loud when what was being asked about was
+                                whether they were bright.
+                            */
+                            auto levelled = result.preset;
+                            loudness::normalise (levelled["settings"], m.rms, m.peak);
+
                             // Named with the reading and the ceiling it missed,
                             // so a listen and the number are side by side.
                             rejectsTo.createDirectory();
@@ -569,7 +581,7 @@ int main (int argc, char** argv)
                                             + "_limit" + juce::String ((int) bounds.high)
                                             + "_" + juce::String (result.seed) + ".vital";
                             rejectsTo.getChildFile (name)
-                                     .replaceWithText (result.preset.dump (2));
+                                     .replaceWithText (levelled.dump (2));
                         }
                         break;
                     }
@@ -616,8 +628,16 @@ int main (int argc, char** argv)
                         if (! again.usable())
                             break;
 
-                        m.rms = std::max (m.rms, again.rms);
-                        m.peak = std::max (m.peak, again.peak);
+                        /*  The mean of the two, not the louder.
+
+                            Taking the louder of two noisy readings does not find
+                            the level a patch sits at, it finds the top of the
+                            scatter, and it moves the answer up every time it is
+                            asked. The peak ceiling still catches anything that
+                            genuinely climbs.
+                        */
+                        m.rms = 0.5f * (m.rms + again.rms);
+                        m.peak = 0.5f * (m.peak + again.peak);
                         wanted = loudness::correctionDb (m.rms, m.peak);
 
                         if (wanted == 0.0f)

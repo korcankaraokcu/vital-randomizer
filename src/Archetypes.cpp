@@ -326,7 +326,15 @@ namespace archetype
                 Where it is routed matters most: through a filter it is a bed,
                 past one it is hiss.
             */
-            { R"(^sample_level$)",                        0.05f,  0.45f },
+            /*  Lower than a real library uses, and deliberately.
+
+                Hand-made presets run their sample as loud as 0.94, but each of
+                those is a different recording. This is always Vital's own white
+                noise, which is flat to the top of the range, so the same level
+                buys far more brightness and no character at all. A keys patch
+                measuring 7 kHz turned into an ordinary one by muting it.
+            */
+            { R"(^sample_level$)",                        0.05f,  0.26f },
             { R"(^sample_destination$)",                  0.0f,   3.0f },
             { R"(^sample_transpose$)",                  -12.0f,   0.0f },
 
@@ -347,7 +355,13 @@ namespace archetype
 
             // effects
             { R"(^distortion_drive$)",                    0.0f,  11.0f },
-            { R"(^distortion_mix$)",                      0.0f,   1.0f },
+            /*  Fully wet distortion leaves nothing of the note underneath it.
+                A lead that measured as far too bright came back to something
+                usable simply by taking the distortion out, and the two things
+                doing the damage were the mix at the top of its range and the
+                drive being swung by a fast LFO. Both are held back now.
+            */
+            { R"(^distortion_mix$)",                      0.15f,  0.70f },
             { R"(^reverb_dry_wet$)",                      0.0f,   0.6f },
             { R"(^reverb_decay_time$)",                  -1.0f,   2.5f },
             { R"(^reverb_size$)",                         0.2f,   1.0f },

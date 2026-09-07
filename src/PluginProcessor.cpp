@@ -470,8 +470,13 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
             if (! again.usable())
                 return false;
 
-            measured.rms = std::max (measured.rms, again.rms);
-            measured.peak = std::max (measured.peak, again.peak);
+            /*  The mean of the two, not the louder. Taking the louder
+                of two noisy readings finds the top of the scatter rather than
+                the level the patch sits at, and moves the answer up every time
+                it is asked. The peak ceiling still catches a real climb.
+            */
+            measured.rms = 0.5f * (measured.rms + again.rms);
+            measured.peak = 0.5f * (measured.peak + again.peak);
             wanted = loudness::correctionDb (measured.rms, measured.peak);
 
             if (wanted == 0.0f)

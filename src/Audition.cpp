@@ -137,11 +137,22 @@ namespace audition
             much of it is down low rather than by where its mean lands.
         */
         if (style == "Bass")       return widen ({ 0.0f,    900.0f });
-        if (style == "Keys")       return widen ({ 60.0f,  2000.0f });
+        /*  Keys and lead sit higher than the library's p90 suggested.
+
+            Every candidate these two threw away within 30% of the old ceiling
+            was played back and none of them sounded wrong for its style, so the
+            line was in the wrong place rather than the patches being bright.
+            The p90 it came from was taken over fourteen presets a style, which
+            is a thin sample to draw a hard edge from.
+
+            The far side is untouched. Keys still rejects at four times its
+            ceiling and lead at nearly three, and none of those were listened to.
+        */
+        if (style == "Keys")       return widen ({ 60.0f,  6000.0f });
         // Pads run brighter than the rest and the library agrees, with a p90
         // just past five kilohertz.
         if (style == "Pad")        return widen ({ 40.0f,  3500.0f });
-        if (style == "Lead")       return widen ({ 120.0f, 3300.0f });
+        if (style == "Lead")       return widen ({ 120.0f, 6800.0f });
         // A hat or a click belongs up there, so this one is generous.
         if (style == "Percussion") return widen ({ 0.0f, 12000.0f });
         // Sequence, SFX and Experiment are allowed to go wherever they like.
