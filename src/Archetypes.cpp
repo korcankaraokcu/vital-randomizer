@@ -53,7 +53,7 @@ namespace archetype
                     { "env_2_attack", 0.0 }, { "env_2_decay", 0.85 },
                     { "env_2_sustain", 0.0 }, { "env_2_release", 0.4 },
                     { "distortion_on", 1.0 }, { "distortion_drive", 5.7 },
-                    { "distortion_mix", 0.7 },
+                    { "distortion_mix", 0.48 },
                     { "reverb_on", 0.0 }, { "reverb_dry_wet", 0.06 },
                     { "eq_on", 1.0 },
                 }),
@@ -164,7 +164,7 @@ namespace archetype
                     { "env_2_attack", 0.0 }, { "env_2_decay", 0.7 },
                     { "env_2_sustain", 0.0 }, { "env_2_release", 0.4 },
                     { "distortion_on", 1.0 }, { "distortion_drive", 5.7 },
-                    { "distortion_mix", 0.65 },
+                    { "distortion_mix", 0.45 },
                     { "reverb_on", 1.0 }, { "reverb_dry_wet", 0.15 },
                     { "delay_on", 1.0 }, { "delay_dry_wet", 0.18 },
                     { "eq_on", 1.0 },
@@ -190,8 +190,8 @@ namespace archetype
                     { "env_1_sustain", 0.0 }, { "env_1_release", 0.25 },
                     { "env_2_attack", 0.0 }, { "env_2_decay", 0.55 },
                     { "env_2_sustain", 0.0 }, { "env_2_release", 0.2 },
-                    { "distortion_on", 1.0 }, { "distortion_drive", 6.3 },
-                    { "distortion_mix", 0.8 },
+                    { "distortion_on", 1.0 }, { "distortion_drive", 5.6 },
+                    { "distortion_mix", 0.50 },
                     { "reverb_on", 1.0 }, { "reverb_dry_wet", 0.2 },
                     { "reverb_decay_time", -0.1 },
                     { "eq_on", 1.0 },
@@ -354,14 +354,22 @@ namespace archetype
             { R"(^portamento_time$)",                   -10.0f,  -3.0f },
 
             // effects
-            { R"(^distortion_drive$)",                    0.0f,  11.0f },
+            /*  Vital's drive knob runs from -30 to +30 dB, so eleven sat at
+                about 68% of the way up it. A lead at 10.8 dB with the mix near
+                two thirds was still tearing after the modulation was tamed, so
+                the ceiling comes down to 60% of the knob, which is +6.
+
+                Hand-made presets that use distortion sit at a median of 3.6 dB,
+                so this is still above what most of them ask for.
+            */
+            { R"(^distortion_drive$)",                    0.0f,   6.0f },
             /*  Fully wet distortion leaves nothing of the note underneath it.
                 A lead that measured as far too bright came back to something
                 usable simply by taking the distortion out, and the two things
                 doing the damage were the mix at the top of its range and the
                 drive being swung by a fast LFO. Both are held back now.
             */
-            { R"(^distortion_mix$)",                      0.15f,  0.70f },
+            { R"(^distortion_mix$)",                      0.15f,  0.50f },
             { R"(^reverb_dry_wet$)",                      0.0f,   0.6f },
             { R"(^reverb_decay_time$)",                  -1.0f,   2.5f },
             { R"(^reverb_size$)",                         0.2f,   1.0f },

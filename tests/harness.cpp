@@ -636,8 +636,12 @@ int main (int argc, char** argv)
                             asked. The peak ceiling still catches anything that
                             genuinely climbs.
                         */
-                        m.rms = 0.5f * (m.rms + again.rms);
-                        m.peak = 0.5f * (m.peak + again.peak);
+                        auto third = audition::audition (*host.processor(), kSampleRate, kBlockSize);
+                        if (! third.usable())
+                            third = again;
+
+                        m.rms = (m.rms + again.rms + third.rms) / 3.0f;
+                        m.peak = (m.peak + again.peak + third.peak) / 3.0f;
                         wanted = loudness::correctionDb (m.rms, m.peak);
 
                         if (wanted == 0.0f)

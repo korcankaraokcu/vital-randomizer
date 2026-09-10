@@ -27,10 +27,13 @@ namespace loudness
             settle, and running out of passes was the commonest single reason a
             candidate was thrown away.
 
-            Two is above the scatter on most patches and still inside the band a
-            listener would call level.
+            Two was enough to make it converge and too much to keep a batch
+            tight: the spread across one crept from 1.4 dB to 2.8 as this and
+            the averaging were loosened. Reading the level three times instead
+            of two cuts the scatter by about a fifth, which buys the deadband
+            back down again.
         */
-        constexpr float kDeadband = 2.0f;
+        constexpr float kDeadband = 1.3f;
 
         float interp (const std::array<float, 9>& xs, const std::array<float, 9>& ys, float x)
         {

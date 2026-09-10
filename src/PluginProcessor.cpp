@@ -475,8 +475,12 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
                 the level the patch sits at, and moves the answer up every time
                 it is asked. The peak ceiling still catches a real climb.
             */
-            measured.rms = 0.5f * (measured.rms + again.rms);
-            measured.peak = 0.5f * (measured.peak + again.peak);
+            auto third = audition::audition (*preview.processor(), sr, 512);
+            if (! third.usable())
+                third = again;
+
+            measured.rms = (measured.rms + again.rms + third.rms) / 3.0f;
+            measured.peak = (measured.peak + again.peak + third.peak) / 3.0f;
             wanted = loudness::correctionDb (measured.rms, measured.peak);
 
             if (wanted == 0.0f)
