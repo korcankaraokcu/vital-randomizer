@@ -192,6 +192,23 @@ namespace audition
                  int note = 48);
 
     /** Render a held note through a prepared synth and measure what came back. */
+    /*  Several renders averaged, because a patch does not measure the same way
+        twice.
+
+        Vital randomises unison phase at every note on and its modulators run
+        free, so one render of one patch reads a level anywhere across a couple
+        of decibels and a pitch across a fraction of a semitone. Every decision
+        the screen makes was being taken from a single draw of that.
+
+        It showed worst in the loudness correction, which was measuring once,
+        correcting by what it saw, measuring once again and correcting by
+        something else, so a patch could bounce either side of the target
+        forever and be thrown out for never settling. Averaging first is what
+        makes the correction converge rather than chase.
+    */
+    Measurement auditionAveraged (juce::AudioProcessor& synth, double sampleRate,
+                                  int blockSize, int times = 3, int note = 48);
+
     Measurement audition (juce::AudioProcessor& synth, double sampleRate,
                           int blockSize, int note = 48, bool resetFirst = true);
 }

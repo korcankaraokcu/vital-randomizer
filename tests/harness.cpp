@@ -605,7 +605,8 @@ int main (int argc, char** argv)
                     // Let it settle after the load, as the plugin does.
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
 
-                    auto m = audition::audition (*host.processor(), kSampleRate, kBlockSize);
+                    auto m = audition::auditionAveraged (*host.processor(), kSampleRate,
+                                                         kBlockSize);
                     if (! m.usable())
                     {
                         exhausted = false;
@@ -720,37 +721,14 @@ int main (int argc, char** argv)
 
                     auto wanted = loudness::correctionDb (m.rms, m.peak);
 
+                    // The reading is already three renders averaged, so there is
+                    // nothing left to confirm it against.
                     if (wanted == 0.0f)
                     {
-                        // Confirm with a second render. A patch whose level
-                        // creeps gets caught at its quietest otherwise.
-                        auto again = audition::audition (*host.processor(), kSampleRate, kBlockSize);
-                        if (! again.usable())
-                            break;
-
-                        /*  The mean of the two, not the louder.
-
-                            Taking the louder of two noisy readings does not find
-                            the level a patch sits at, it finds the top of the
-                            scatter, and it moves the answer up every time it is
-                            asked. The peak ceiling still catches anything that
-                            genuinely climbs.
-                        */
-                        auto third = audition::audition (*host.processor(), kSampleRate, kBlockSize);
-                        if (! third.usable())
-                            third = again;
-
-                        m.rms = (m.rms + again.rms + third.rms) / 3.0f;
-                        m.peak = (m.peak + again.peak + third.peak) / 3.0f;
-                        wanted = loudness::correctionDb (m.rms, m.peak);
-
-                        if (wanted == 0.0f)
-                        {
-                            accepted = true;
-                            exhausted = false;
-                            accepted_m = m;
-                            break;
-                        }
+                        accepted = true;
+                        exhausted = false;
+                        accepted_m = m;
+                        break;
                     }
 
                     const auto got = loudness::normalise (result.preset["settings"],

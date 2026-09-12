@@ -4,18 +4,18 @@ Open work, roughly in the order I would do it. Anything measured is measured, so
 the numbers here come from `vrtest` and from rendering through Vital rather than
 from impressions.
 
-## 1. A level that will not settle is the commonest rejection left
+## 1. The screen measures three times and it is not free
 
-Twenty four of the forty four in a 240 roll run, spread across every style and
-the largest single reason in most of them. The correction ran its passes and the
-patch still was not where it was aimed.
+Every check now runs on three renders averaged rather than one, because Vital
+randomises unison phase at every note on and one render of one patch reads a
+level across a couple of decibels and a pitch across a fraction of a semitone.
+That took the commonest rejection, a level that would not settle, from 24 in a
+240 roll run to 2, and the whole run from 82% usable to 92%.
 
-It was worse before the deadband was widened and the reading averaged over three
-renders, so some of what is left is genuinely a patch whose loudness depends on
-something the correction cannot reach: a compressor or a limiter in its own
-chain responding to the master volume rather than tracking it. Worth finding out
-whether those patches are unusable or merely uncalibrated, because if it is the
-latter they are being thrown away over bookkeeping.
+It costs three times the rendering in the screen, which lands on the worker
+thread and is hidden by the prefetch, so nobody waits for it. Whether it is
+worth three renders or would do with two has not been measured, and two would be
+the obvious thing to try before anybody adds a fourth.
 
 ## 2. DIRT is the weakest axis and neither metric measures it well
 
@@ -37,10 +37,3 @@ It works on the styles whose crest is low to begin with and fails on the ones
 already dense, which hints the metric reads the signal rather than the drive.
 What would settle it is a measure built from what DIRT actually does, the energy
 distortion adds between the harmonics.
-
-## 3. The sample factory is undocumented
-
-`docs/notes.md` explains why the wavetables are synthesised and says nothing
-about the seven sample models, which are a larger piece of work and rest on the
-same argument. The notes are how anybody else would understand the decisions,
-and right now half of them are missing.

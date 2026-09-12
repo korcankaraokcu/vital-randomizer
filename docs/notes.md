@@ -41,16 +41,16 @@ An archetype is coherent by construction, which is what makes this work: a bass
 is a bass because it was designed as one. That coherence is measurable, and it
 is why the usable rate sits in the high eighties.
 
-**Wavetables are synthesised.** A Vital wave keyframe is 2048 little-endian
-floats in base64 and every other component in the format is plain parameters, so
-the tables are written from scratch: harmonic spectra built from shape families
-that suit the style, morphing across up to eight keyframes, with Vital's own
-algorithmic modifiers stacked on top. Samples work the same way, drawing on
-Vital's own noise.
+**Wavetables and samples are synthesised.** A Vital wave keyframe is 2048
+little-endian floats in base64, a sample is mono sixteen bit audio in the same
+place, and every other component in the format is plain parameters. So both are
+written from scratch: the tables as harmonic spectra built from shape families
+that suit the style, morphing across up to eight keyframes with Vital's own
+algorithmic modifiers on top, and the sample from one of seven synthesis models.
 
-Writing them per roll is where the variety comes from, since the harmonic
-content is fresh every time, and it keeps a generated patch free of licensed
-content and therefore yours to share.
+Writing them per roll is where the variety comes from, since the content is
+fresh every time, and it keeps a generated patch free of licensed content and
+therefore yours to share.
 
 **What each style favours is written down.** Each archetype names the settings
 and routings that make that style what it is, and the style's signature routing
@@ -417,6 +417,76 @@ After all of it, at the per-style defaults:
 params med 107 (84-130)   routings med 12 (7-23)   filter 2 on in 31 of 48
 84% of candidates usable
 ```
+
+## Seven ways to make a sample
+
+Every patch that used the sample slot used to get Vital's own white noise. A
+layer whose job is to add character added the same flat hiss to all of them, and
+because white noise is flat to the top of the range it cost far more brightness
+than it bought: keys patches reading seven kilohertz turned into ordinary ones
+the moment it was muted. The oscillators were never the problem.
+
+Nothing here randomises audio, which would only be noise again. What is
+randomised is the parameters of a synthesis model, so each result is a different
+instance of a sound that exists. That is the same rule the wavetables follow and
+the reason they came out musical.
+
+| model | what it is | how it is made |
+|---|---|---|
+| Bed | dense texture, air or a room | noise through two resonant bands |
+| Voice | nearer a vowel than a filter | noise through three formants |
+| Grit | sparse crackle over near silence | scattered filtered ticks, 27 dB crest |
+| Struck | a bell, a bar, a block | inharmonic partials decaying, high ones first |
+| Pluck | a string | Karplus-Strong, harmonic where struck is not |
+| Swell | arrives rather than decays | a rising envelope on an opening band |
+| Thump | weight under a bass | a sine falling onto its root, as an 808 is built |
+
+They are chosen to be far apart rather than to cover a range, because two
+textures that could be mistaken for each other are worth less than one: dense
+against sparse, harmonic against inharmonic, rising against decaying, texture
+against voice.
+
+Which ones a style may draw from is about what the layer is for. Bass and
+percussion take only what stops on its own, since a bed never does. Keys, lead
+and sequence take only what has a pitch, because a bed or a crackle under a
+played line is a second sound behind the note rather than part of it. Pads never
+take a struck body, which inside a chord is a second instrument. SFX and
+Experiment take all seven, since being unplaceable is the point.
+
+**The factory says how loud to run what it built.** Peak normalising leaves
+sparse content far quieter on average than dense content: grit measures 13 dB
+below a bed at the same peak, because most of it is silence. One level for all
+of them makes half the models inaudible and the other half overbearing.
+
+**Loops are eight seconds and nearly stationary.** Vital's own Waves preset
+carries ten seconds whose spectrum moves under a tenth across the whole of it,
+which is two tricks at once: nothing distinctive happens, and what does happen
+takes a long time to come round. The first attempt was two seconds with a wander
+in it, the opposite of both, and the wander was the worse half, since a feature
+the ear can learn is one it can hear returning.
+
+The length is free because the rate is not fixed. Vital reads the `sample_rate`
+field and resamples, which was worth testing rather than assuming: the same audio
+declared at half the rate comes back at the same pitch, while the same bytes
+declared at full rate come back an octave up. A bed has nothing above ten
+kilohertz in it, so it stores at 22050 and costs half. Eight seconds is sixteen
+beats at the 120 BPM the hosted playhead reports, so it sits under the patch in
+time with the LFOs rather than sliding against them. Vital's sampler has no sync
+of its own, so at any other host tempo it drifts, and nothing in the format can
+prevent that.
+
+**The join is crossfaded on equal power, not equal amplitude.** Fading one out
+linearly while the other fades in is right for two takes of the same thing and
+wrong for two pieces of noise, which add as powers rather than amplitudes: half
+and half leaves 0.707 of the level, so a bed dropped four decibels into a hole
+every time round and climbed back out. Weighting by the square root keeps the
+powers summing to one. Anything moving inside a loop is locked to a whole number
+of cycles across it as well, or the loop point is a jump in the modulation that
+no crossfade hides.
+
+`vrtest --models=<dir>` writes three bare presets for each model, with the
+oscillators, filters and effects taken out, because a layer is normally heard
+under two oscillators and a reverb and that is the wrong way to judge one.
 
 ## What makes a bass a bass
 

@@ -414,7 +414,7 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
         // patch, so a short one is played and discarded before measuring.
         audition::settle (*preview.processor(), sr, 512);
 
-        measured = audition::audition (*preview.processor(), sr, 512);
+        measured = audition::auditionAveraged (*preview.processor(), sr, 512);
         if (! measured.usable())
             return false;
 
@@ -454,43 +454,22 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
 
         auto wanted = loudness::correctionDb (measured.rms, measured.peak);
 
+        /*  Nothing left to confirm.
+
+            The reading is already three renders averaged, taken before the
+            correction was worked out rather than after it looked right. This
+            used to measure once, correct by what that one render said and
+            measure once more, which is how a patch could bounce either side of
+            the target until the passes ran out and be thrown away for never
+            settling. It was the commonest rejection there was.
+        */
         if (wanted == 0.0f)
         {
-            /*  Confirm with a second render before believing it.
-
-                Some patches do not settle. A delay feeding back, a filter close
-                to self oscillation, a free running LFO landing somewhere else:
-                the level climbs each time the note is played. Measuring once
-                catches those at their quietest, which is how a lead that runs
-                twelve dB over the rest of a batch was accepted as being on
-                target. Two readings that agree means the number is real, and
-                the louder of the two is the one worth matching.
-            */
-            const auto again = audition::audition (*preview.processor(), sr, 512);
-            if (! again.usable())
-                return false;
-
-            /*  The mean of the two, not the louder. Taking the louder
-                of two noisy readings finds the top of the scatter rather than
-                the level the patch sits at, and moves the answer up every time
-                it is asked. The peak ceiling still catches a real climb.
-            */
-            auto third = audition::audition (*preview.processor(), sr, 512);
-            if (! third.usable())
-                third = again;
-
-            measured.rms = (measured.rms + again.rms + third.rms) / 3.0f;
-            measured.peak = (measured.peak + again.peak + third.peak) / 3.0f;
-            wanted = loudness::correctionDb (measured.rms, measured.peak);
-
-            if (wanted == 0.0f)
-            {
-                auditionSummary = juce::String (measured.rms, 3) + " rms";
-                if (std::abs (totalDb) >= 1.0f)
-                    auditionSummary << ", " << (totalDb > 0 ? "+" : "")
-                                    << juce::String (juce::roundToInt (totalDb)) << " dB";
-                return true;
-            }
+            auditionSummary = juce::String (measured.rms, 3) + " rms";
+            if (std::abs (totalDb) >= 1.0f)
+                auditionSummary << ", " << (totalDb > 0 ? "+" : "")
+                                << juce::String (juce::roundToInt (totalDb)) << " dB";
+            return true;
         }
 
         // Match the level by moving the patch's own master volume rather than

@@ -49,6 +49,73 @@ namespace audition
         return style == "Sequence";
     }
 
+    Measurement auditionAveraged (juce::AudioProcessor& synth, double sampleRate,
+                                  int blockSize, int times, int note)
+    {
+        times = juce::jmax (1, times);
+
+        Measurement sum;
+        int votes[5] = { 0, 0, 0, 0, 0 };   // silent, clipping, clickOnly, peaky, lopsided
+        int counted = 0;
+
+        for (int i = 0; i < times; ++i)
+        {
+            const auto m = audition (synth, sampleRate, blockSize, note);
+            if (i == 0)
+                sum = m;                    // so anything not averaged still has a value
+            else
+            {
+                sum.rms += m.rms;           sum.peak += m.peak;
+                sum.sustainRms += m.sustainRms; sum.tailRms += m.tailRms;
+                sum.motion += m.motion;     sum.crestDb += m.crestDb;
+                sum.balanceDb += m.balanceDb; sum.centroidHz += m.centroidHz;
+                sum.lowRatio += m.lowRatio; sum.highSpike += m.highSpike;
+                sum.spectralMotion += m.spectralMotion;
+                sum.heldRatio += m.heldRatio;
+                sum.pitchHz += m.pitchHz;   sum.pitchSalience += m.pitchSalience;
+                sum.pitchErrorSemitones += m.pitchErrorSemitones;
+                sum.pitchOffGridSemitones += m.pitchOffGridSemitones;
+                sum.stepSalience += m.stepSalience;
+                sum.stepErrorSemitones += m.stepErrorSemitones;
+                sum.stepOffGridSemitones += m.stepOffGridSemitones;
+                sum.steps = juce::jmax (sum.steps, m.steps);
+            }
+
+            votes[0] += m.silent ? 1 : 0;
+            votes[1] += m.clipping ? 1 : 0;
+            votes[2] += m.clickOnly ? 1 : 0;
+            votes[3] += m.tooPeaky ? 1 : 0;
+            votes[4] += m.lopsided ? 1 : 0;
+            ++counted;
+        }
+
+        if (counted > 1)
+        {
+            const auto n = (float) counted;
+            for (auto* v : { &sum.rms, &sum.peak, &sum.sustainRms, &sum.tailRms,
+                             &sum.motion, &sum.crestDb, &sum.balanceDb, &sum.centroidHz,
+                             &sum.lowRatio, &sum.highSpike, &sum.spectralMotion,
+                             &sum.heldRatio, &sum.pitchHz, &sum.pitchSalience,
+                             &sum.pitchErrorSemitones, &sum.pitchOffGridSemitones,
+                             &sum.stepSalience, &sum.stepErrorSemitones,
+                             &sum.stepOffGridSemitones })
+                *v /= n;
+        }
+
+        /*  A fault has to show in most of the renders, not one of them.
+
+            Throwing a patch away because a single draw came out lopsided is the
+            same mistake as correcting its level from a single draw.
+        */
+        const auto majority = (counted / 2) + 1;
+        sum.silent = votes[0] >= majority;
+        sum.clipping = votes[1] >= majority;
+        sum.clickOnly = votes[2] >= majority;
+        sum.tooPeaky = votes[3] >= majority;
+        sum.lopsided = votes[4] >= majority;
+        return sum;
+    }
+
     PitchRule pitchRuleFor (const std::string& style)
     {
         if (style == "Bass" || style == "Keys" || style == "Lead")
