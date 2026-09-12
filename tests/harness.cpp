@@ -700,8 +700,21 @@ int main (int argc, char** argv)
                             || pitchError > pitch.maxErrorSemitones))
                     {
                         exhausted = false;
-                        rejects[style][salience < pitch.minSalience
-                                           ? "pitch unclear" : "wrong note"]++;
+                        const auto why = salience < pitch.minSalience
+                                             ? "pitch unclear" : "wrong note";
+                        rejects[style][why]++;
+
+                        if (rejectsTo != juce::File())
+                        {
+                            rejectsTo.createDirectory();
+                            auto levelled = result.preset;
+                            loudness::normalise (levelled["settings"], m.rms, m.peak);
+                            const auto name = style + "_" + juce::String (why).replace (" ", "")
+                                + "_off" + juce::String ((int) (100.0f * pitchError))
+                                + "_sal" + juce::String ((int) (100.0f * salience))
+                                + "_" + juce::String (result.seed) + ".vital";
+                            rejectsTo.getChildFile (name).replaceWithText (levelled.dump (2));
+                        }
                         break;
                     }
 

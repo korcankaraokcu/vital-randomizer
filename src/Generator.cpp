@@ -932,6 +932,40 @@ namespace gen
                 settings[key] = 4095;
         }
 
+        /*  A step has to be one note, and a wide unison is not one note.
+
+            The quantiser does its job: a stripped sequence lands within a
+            fiftieth of a semitone. What pulls it off the grid is the unison
+            underneath it, and turning that off brought every failing patch
+            straight back on. Sweeping it showed two things. The error climbs
+            steadily with the detune, and it is worse with fewer voices, because
+            two detuned voices beat against each other while eight average into
+            a cluster with a centre the ear can find.
+
+            Under about 2.5 nothing measured past 0.19 at any voice count, which
+            is half the limit. Hand-made sequences sit at a median of 2.54, so
+            this is where they already live.
+        */
+        for (const auto& osc : { "osc_1", "osc_2", "osc_3" })
+        {
+            const auto detune = std::string (osc) + "_unison_detune";
+            if (! settings.contains (detune))
+                continue;
+
+            /*  Two voices beat, eight blend.
+
+                The sweep was clear about this: at the same detune, two voices
+                land twice as far off the grid as eight, because two tones a
+                little apart are an interference and eight are a texture. So a
+                thin unison gets a narrow one, and only a thick one is allowed
+                to spread.
+            */
+            const auto voices = settings.value (std::string (osc) + "_unison_voices", 1.0);
+            const auto widest = voices < 4.0 ? 1.0f : 2.5f;
+            if (settings[detune].get<float>() > widest)
+                settings[detune] = widest;
+        }
+
         if (settings.contains ("lfos") && settings["lfos"].is_array())
         {
             auto& lfos = settings["lfos"];

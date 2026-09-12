@@ -317,7 +317,16 @@ namespace archetype
             { R"(^osc_\d_wave_frame$)",                   0.0f, 256.0f },
             { R"(^osc_\d_spectral_morph_amount$)",        0.0f,   1.0f },
             { R"(^osc_\d_distortion_amount$)",            0.0f,   0.85f },
-            { R"(^osc_\d_unison_detune$)",                0.0f,   5.5f },
+            /*  As wide as a real preset goes, and no wider.
+
+                Hand-made presets put their p90 at about 4.47 in every style,
+                which looks like Vital's own default, and sequences never exceed
+                it at all. Five and a half was above all of that, and the
+                sequences that failed for landing between semitones were every
+                one of them past 4.4: a unison spread that wide stops being a
+                note with width and becomes a cluster with no centre to hear.
+            */
+            { R"(^osc_\d_unison_detune$)",                0.0f,   4.5f },
             { R"(^osc_\d_unison_voices$)",                1.0f,   9.0f },
             { R"(^osc_\d_pan$)",                          0.0f,   0.0f },   // never
             /*  The noise layer is Vital's own sample, so it is the same audio
