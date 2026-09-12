@@ -8,6 +8,7 @@
 
 #include "Axes.h"
 #include "Loudness.h"
+#include "SampleFactory.h"
 #include "WavetableFactory.h"
 
 namespace gen
@@ -325,12 +326,17 @@ namespace gen
                 settings["osc_2_on"] = 0.0;      // stripped right back
             }
 
-            if (! mustStopDead && chance (0.45f))
+            /*  Bass is back in.
+
+                It was barred from this when the layer was Vital's flat white
+                noise, which dragged it straight into the brightness ceiling.
+                What it can draw now is a thump or a pluck, both of which stop on
+                their own and neither of which carries any top, so the reason for
+                the ban has gone.
+            */
+            if (chance (r.style == "Percussion" ? 0.60f : 0.45f))
             {
                 settings["sample_on"] = 1.0;
-                // Kept low on purpose. Noise is flat all the way up, so it
-                // shifts a patch's brightness far more than its level suggests.
-                settings["sample_level"] = 0.07 + 0.11 * uniform (rng);
             }
         }
 
@@ -368,6 +374,50 @@ namespace gen
             for (const auto& fx : { "phaser_on", "flanger_on", "chorus_on" })
                 if (settings.contains (fx))
                     settings[fx] = 0.0;
+    }
+
+    void Generator::synthesiseSample (const Request& r, nlohmann::json& settings,
+                                      std::mt19937& rng)
+    {
+        /*  Built rather than borrowed, the same as the wavetables.
+
+            Every patch used to get Vital's own white noise, which is the same
+            flat hiss in all of them and costs more brightness than it buys. A
+            bed has a voice and a struck body has a shape, and both are worth
+            having at a level a fixed noise never was.
+
+            This runs wherever the layer ends up switched on, not only where
+            COMPLEX switched it on, because the archetypes turn it on for
+            themselves and those patches were still getting the old noise.
+        */
+        if (r.locks.count (schema::Section::osc) > 0
+            || settings.value ("sample_on", 0.0) < 0.5)
+            return;
+
+        sampler::Request sr;
+        sr.style = r.style;
+        for (const auto& key : { "bright", "dirt", "complexity" })
+        {
+            const auto value = r.sliders.count (key) > 0 ? r.sliders.at (key) : 0.5f;
+            if (std::string (key) == "bright")      sr.bright = value;
+            else if (std::string (key) == "dirt")   sr.dirt = value;
+            else                                    sr.complexity = value;
+        }
+
+        // A bed loops for as long as the key is down, which is the one thing a
+        // struck style must not do, so those get the struck model or nothing.
+        sr.struckOnly = r.style == "Bass" || r.style == "Percussion";
+
+        auto built = sampler::create (rng, sr);
+        settings["sample"] = std::move (built.sample);
+        settings["sample_loop"] = built.loop ? 1.0 : 0.0;
+        settings["sample_keytrack"] = built.keytrack ? 1.0 : 0.0;
+        /*  A looping layer starts wherever it likes, so two notes do not put
+            the same part of it in the same place and make the repeat obvious.
+            Anything one shot starts at its beginning, because its beginning is
+            the attack. */
+        settings["sample_random_phase"] = built.loop ? 1.0 : 0.0;
+        settings["sample_level"] = built.level;
     }
 
     void Generator::synthesiseContent (const Request& r, nlohmann::json& settings,
@@ -1112,6 +1162,7 @@ namespace gen
             ensureModSlots (settings);
             applyArchetype (*style, r, settings);
             applyComplexity (r, settings, srng);
+            synthesiseSample (r, settings, srng);
         }
 
         synthesiseContent (r, settings, srng);

@@ -22,6 +22,7 @@
 
 #include "../src/Audition.h"
 #include "../src/Archetypes.h"
+#include "../src/SampleFactory.h"
 #include "../src/Axes.h"
 #include "../src/Generator.h"
 #include "../src/Loudness.h"
@@ -169,6 +170,7 @@ int main (int argc, char** argv)
         histogram.
     */
     juce::File rejectsTo;
+    juce::File modelsTo;
     for (int i = 1; i < argc; ++i)
     {
         const juce::String arg (argv[i]);
@@ -189,6 +191,7 @@ int main (int argc, char** argv)
             else
                 complexity = value.getFloatValue();
         }
+        if (arg.startsWith ("--models="))    modelsTo = juce::File (value);
         if (arg.startsWith ("--stats="))     statsRolls = value.getIntValue();
         if (arg.startsWith ("--rejects="))   rejectsTo = juce::File (value);
         if (arg.startsWith ("--axis="))      axisKey = value.trim();
@@ -298,6 +301,90 @@ int main (int argc, char** argv)
         rolled again into a different patch, and then the two sides are no longer
         the same patch with one slider moved.
     */
+    /*  One preset per sample model, with everything else taken out.
+
+        The layer is normally heard underneath two oscillators, a filter and a
+        reverb, which is the right way to use it and the wrong way to judge it.
+        These have the oscillators off, the filters bypassed, every effect off
+        and an envelope that just gets out of the way, so what comes out of the
+        speaker is the model and nothing else.
+    */
+    if (modelsTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        modelsTo.createDirectory();
+
+        std::mt19937 rng { 0x5A11E5u };
+        /*  Three of each.
+
+            Every model draws its own parameters per patch, so two instances of
+            one are as different from each other as two presets are. One of each
+            shows what the models are and hides that, which is the more obvious
+            question when hearing them for the first time.
+        */
+        for (int variant = 1; variant <= 3; ++variant)
+        for (const auto& name : sampler::modelNames())
+        {
+            auto preset = init;
+            auto& s = preset["settings"];
+
+            sampler::Request sr;
+            sr.style = "Experiment";        // no style rules to narrow the model
+            sr.model = name;
+            sr.bright = 0.5f;
+            sr.dirt = 0.5f;
+            sr.complexity = 0.6f;
+            auto built = sampler::create (rng, sr);
+
+            for (const auto* off : { "osc_1_on", "osc_2_on", "osc_3_on",
+                                     "filter_1_on", "filter_2_on", "filter_fx_on",
+                                     "reverb_on", "delay_on", "chorus_on", "phaser_on",
+                                     "flanger_on", "distortion_on", "compressor_on",
+                                     "eq_on" })
+                if (s.contains (off))
+                    s[off] = 0.0;
+
+            s["sample"] = std::move (built.sample);
+            s["sample_on"] = 1.0;
+            s["sample_loop"] = built.loop ? 1.0 : 0.0;
+            s["sample_keytrack"] = built.keytrack ? 1.0 : 0.0;
+            s["sample_pan"] = 0.0;
+            // Loud, because it is the only thing making a sound.
+            s["sample_level"] = 0.85;
+
+            // An envelope that does not shape it, so the model is what is heard.
+            s["env_1_attack"] = 0.0;
+            s["env_1_decay"] = 1.0;
+            s["env_1_sustain"] = 1.0;
+            s["env_1_release"] = 0.35;
+
+            s["modulations"] = nlohmann::json::array();
+            for (int i = 0; i < gen::kModSlots; ++i)
+                s["modulations"].push_back ({ { "destination", "" }, { "source", "" } });
+
+            s["volume"] = loudness::kVolumeDefault;
+            preset["preset_name"] = name + " " + std::to_string (variant) + " (bare)";
+            preset["preset_style"] = "Experiment";
+            preset["comments"] = "one sample model, nothing else";
+            preset["author"] = "";
+
+            const auto file = modelsTo.getChildFile ("Model_" + juce::String (name)
+                                                      + "_" + juce::String (variant) + ".vital");
+            file.replaceWithText (juce::String (preset.dump()));
+            std::cout << "  " << file.getFileName()
+                      << (built.loop ? "   looping" : "   one shot")
+                      << (built.keytrack ? ", follows the keyboard" : "") << std::endl;
+        }
+        std::cout << "\nwritten to " << modelsTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
     if (axisKey.isNotEmpty())
     {
         /*  Each axis needs the number that says whether it did its job, and

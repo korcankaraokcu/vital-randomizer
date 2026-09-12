@@ -75,6 +75,8 @@ namespace gen
         void applyArchetype (const archetype::Archetype& a, const Request& r,
                              nlohmann::json& settings);
         void applyComplexity (const Request& r, nlohmann::json& settings, std::mt19937& rng);
+        void synthesiseSample (const Request& r, nlohmann::json& settings,
+                               std::mt19937& rng);
         void synthesiseContent (const Request& r, nlohmann::json& settings,
                                 std::mt19937& rng);
         void applyAxes (const Request& r, nlohmann::json& settings, std::mt19937& rng);

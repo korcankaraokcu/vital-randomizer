@@ -28,6 +28,7 @@ target_sources(VitalRandomizer PRIVATE
     src/VitalState.cpp
     src/Audition.cpp
     src/WavetableFactory.cpp
+    src/SampleFactory.cpp
     src/Schema.cpp
     src/Axes.cpp
     src/Archetypes.cpp
@@ -90,6 +91,7 @@ target_sources(vrtest PRIVATE
     src/VitalState.cpp
     src/Audition.cpp
     src/WavetableFactory.cpp
+    src/SampleFactory.cpp
     src/Schema.cpp
     src/Axes.cpp
     src/Archetypes.cpp
