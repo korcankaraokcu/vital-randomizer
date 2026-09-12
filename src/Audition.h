@@ -53,6 +53,20 @@ namespace audition
         float lowRatio = 0.0f;
         float highSpike = 0.0f;
 
+        /*  Whether the level climbed across the renders rather than wandering.
+
+            Two different things move a patch's level between plays and they
+            want opposite answers. Unison phase lands somewhere new at every note
+            on, which is scatter, and the mean of a few renders describes it. A
+            delay feeding back or a filter near self oscillation builds instead,
+            and the mean understates where it ends up: measured across a batch,
+            ten patches in forty eight climb, one of them from 0.121 to 0.188.
+
+            Where it climbs the loudest reading is the honest one, because that
+            is what a player hears by the third time they press the key.
+        */
+        bool climbing = false;
+
         /*  How much the tone moves, as opposed to how much the level does.
 
             `motion` above measures the envelope, which is the wrong question for

@@ -57,10 +57,17 @@ namespace audition
         Measurement sum;
         int votes[5] = { 0, 0, 0, 0, 0 };   // silent, clipping, clickOnly, peaky, lopsided
         int counted = 0;
+        float firstRms = 0.0f, lastRms = 0.0f, loudestRms = 0.0f, loudestPeak = 0.0f;
 
         for (int i = 0; i < times; ++i)
         {
             const auto m = audition (synth, sampleRate, blockSize, note);
+            if (i == 0)
+                firstRms = m.rms;
+            lastRms = m.rms;
+            loudestRms = juce::jmax (loudestRms, m.rms);
+            loudestPeak = juce::jmax (loudestPeak, m.peak);
+
             if (i == 0)
                 sum = m;                    // so anything not averaged still has a value
             else
@@ -107,6 +114,20 @@ namespace audition
             Throwing a patch away because a single draw came out lopsided is the
             same mistake as correcting its level from a single draw.
         */
+        /*  A climb, not a wander.
+
+            Fifteen percent between the first render and the last is past
+            anything the phase scatter produces on its own, and it only counts
+            in one direction: a patch that happened to start loud and end quiet
+            is scatter like any other.
+        */
+        sum.climbing = counted > 1 && firstRms > 1.0e-6f && lastRms > firstRms * 1.15f;
+        if (sum.climbing)
+        {
+            sum.rms = loudestRms;
+            sum.peak = loudestPeak;
+        }
+
         const auto majority = (counted / 2) + 1;
         sum.silent = votes[0] >= majority;
         sum.clipping = votes[1] >= majority;
