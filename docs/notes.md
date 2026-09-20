@@ -587,6 +587,9 @@ the way depends on how lucky the first few rolls were. Five identical runs threw
 away between 19 and 61 candidates, which is a wider spread than most changes
 worth testing, and it was very nearly used as evidence twice.
 
+`vrtest --renders=N` sets how many renders each measurement averages, which is
+three in the screen and is what decided that three is where it stays.
+
 `vrtest --stats=N` rolls the same number every time, screens each once with no
 retry, and writes nothing. Two runs of it gave 55% and 58%, and the per style
 counts landed within a few of each other. That is a number a change can be judged
@@ -696,6 +699,46 @@ python measure.py level      ../out
 python measure.py pitch      ../out
 python measure.py held       ../out/Bass_01.vital
 ```
+
+## Three renders, and why it is not two
+
+Every check now runs on three renders averaged rather than one, because Vital
+randomises unison phase at every note on and one render of one patch reads a
+level across a couple of decibels and a pitch across a fraction of a semitone.
+That took the commonest rejection, a level that would not settle, from 24 in a
+240 roll run to 2, and the whole run from 82% usable to 92%.
+
+It costs three times the rendering in the screen, which lands on the worker
+thread and is hidden by the prefetch, so nobody waits for it.
+
+Whether two would do the same was the open question, and `vrtest --stats=24
+--renders=N` answers it. Four passes of each count, interleaved so machine load
+fell on both equally, 768 rolls per count:
+
+| renders | usable | level never settled | level spread | wall per 192 rolls |
+|---|---|---|---|---|
+| 1 | 81% | 14 of 192 | | 310s |
+| 2 | 87.1% | 38 of 768 (4.9%) | 1.83 dB | 444s |
+| 3 | 89.3% | 27 of 768 (3.5%) | 1.83 dB | 552s |
+| 4 | 86% | 11 of 192 | | 677s |
+
+One render is clearly worse and four is no better than three while costing 44%
+more, so the range worth arguing about is two against three.
+
+Three leads on both counts and in three of the four passes, but neither lead is
+significant: z = 1.34 on the usable rate and z = 1.39 on the settling count,
+which is p around 0.17 either way. Separating a two point difference at this
+variance would take something like five thousand rolls per count, six hours of
+rendering, to decide whether to save half a second per roll on a thread nobody
+is waiting for. That is a worse trade than the one being measured.
+
+The level spread is the same to two figures at 1.83 dB, so the extra render is
+not buying a tighter correction. What it buys, if anything, is fewer patches
+where the correction fails to converge at all.
+
+Staying at three. Not because three is proven better, but because two is not
+proven equal and the cost is already hidden. Worth revisiting only if the
+screen ever moves somewhere the user waits for it.
 
 ## Licensing
 

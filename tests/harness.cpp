@@ -179,6 +179,12 @@ int main (int argc, char** argv)
     // seven note maqam than on a pentatonic, and the note floor bites hardest
     // on the big scales, so it has to be possible to ask for one.
     juce::String gestureScale { "minor pentatonic" };
+    /*  How many renders each measurement averages.
+    
+        Three is what the screen uses. Whether three is needed or two would do
+        the same has never been measured, and this is what measures it.
+    */
+    int renders = 3;
     for (int i = 1; i < argc; ++i)
     {
         const juce::String arg (argv[i]);
@@ -203,6 +209,7 @@ int main (int argc, char** argv)
         if (arg.startsWith ("--scales="))    scalesTo = juce::File (value);
         if (arg.startsWith ("--gestures=")) gesturesTo = juce::File (value);
         if (arg.startsWith ("--gesture-scale=")) gestureScale = value;
+        if (arg.startsWith ("--renders="))   renders = juce::jlimit (1, 8, value.getIntValue());
         if (arg.startsWith ("--stats="))     statsRolls = value.getIntValue();
         if (arg.startsWith ("--rejects="))   rejectsTo = juce::File (value);
         if (arg.startsWith ("--axis="))      axisKey = value.trim();
@@ -834,7 +841,7 @@ int main (int argc, char** argv)
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
 
                     auto m = audition::auditionAveraged (*host.processor(), kSampleRate,
-                                                         kBlockSize);
+                                                         kBlockSize, renders);
                     if (! m.usable())
                     {
                         exhausted = false;
