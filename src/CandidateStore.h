@@ -37,6 +37,11 @@ namespace store
         unsigned int seed = 0;
         std::vector<std::string> locks;
         std::string label;
+        /*  Which scale a sequence walked. Chosen when the roll is built rather
+            than inside the generator, because the user may have narrowed the
+            choice to a handful, and a recipe that did not carry the answer
+            would walk a different scale every time history replayed it. */
+        int scale = -1;
 
         gen::Request toRequest() const;
         static Recipe fromRequest (const gen::Request& r, unsigned int seed);

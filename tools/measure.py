@@ -112,6 +112,16 @@ def pitch_of(segment, top=2000.0):
         return 0.0, 0.0
     lag = int(np.argmax(band)) + start
 
+    # The correlation is nearly as strong at twice the period as at the period
+    # itself, so the tallest peak is sometimes an octave down: middle C came back
+    # at 130.8 Hz and G at 196. The fundamental is the shortest lag that is still
+    # about as good, so step back through the halves and take it.
+    for divisor in (4, 3, 2):
+        shorter = int(round(lag / divisor))
+        if shorter >= max(start, lo) and correlation[shorter] > 0.85 * correlation[lag]:
+            lag = shorter
+            break
+
     if 0 < lag < len(correlation) - 1:
         y1, y2, y3 = correlation[lag - 1], correlation[lag], correlation[lag + 1]
         denom = y1 - 2 * y2 + y3

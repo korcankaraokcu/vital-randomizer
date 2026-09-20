@@ -220,6 +220,17 @@ gen::Request VitalRandomizerProcessor::buildRequest() const
     for (const auto& s : sliders)
         r.sliders[s.first.toStdString()] = s.second;
     r.locks = locks;
+
+    /*  One scale off the list per roll.
+
+        The list is what the user will accept, not what this roll gets, so a
+        draw happens here. An entry of Random stays Random and lets the
+        generator take the whole table, which is what makes a single Random
+        entry behave exactly as it did before there was a list at all.
+    */
+    if (! scales.empty())
+        r.scale = scales[(size_t) juce::Random::getSystemRandom()
+                             .nextInt ((int) scales.size())];
     return r;
 }
 
@@ -372,6 +383,8 @@ juce::String VitalRandomizerProcessor::requestSignature() const
         s << "|" << slider.first << "=" << juce::String (slider.second, 3);
     for (const auto& lock : locks)
         s << "|L" << (int) lock;
+    for (const auto scale : scales)
+        s << "|S" << scale;
     return s;
 }
 
@@ -444,7 +457,7 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
         const auto pitch = audition::pitchRuleFor (styleName);
         const auto stepped = audition::isSteppedStyle (styleName) && measured.steps > 0;
         const auto salience = stepped ? measured.stepSalience : measured.pitchSalience;
-        const auto pitchError = stepped ? measured.stepOffGridSemitones
+        const auto pitchError = stepped ? measured.stepOffQuarterSemitones
                               : pitch.octavesOnly ? measured.pitchErrorSemitones
                                                   : measured.pitchOffGridSemitones;
         if (pitch.required
@@ -493,6 +506,9 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
     {
         auto request = buildRequest();
         request.seed = result.seed;
+        // buildRequest draws a fresh scale each time it is called, so the one
+        // this patch actually walked has to come from the result.
+        request.scale = result.scale;
         candidateStore.push (store::Recipe::fromRequest (request, result.seed));
     }
 
@@ -626,6 +642,52 @@ float VitalRandomizerProcessor::slider (const juce::String& axis) const
     return it == sliders.end() ? 0.5f : it->second;
 }
 
+std::vector<int> VitalRandomizerProcessor::scaleChoices() const
+{
+    const juce::ScopedLock sl (settingsLock);
+    return scales;
+}
+
+void VitalRandomizerProcessor::setScaleChoice (size_t index, int scale)
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        if (index >= scales.size())
+            return;
+        scales[index] = scale;
+    }
+    dropPrefetch();
+    sendChangeMessage();
+}
+
+void VitalRandomizerProcessor::addScaleChoice()
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        // One slot per scale in the table is as far as the list can usefully
+        // go; past that it is asking for all of them, which is the default.
+        if (scales.size() >= gen::sequenceScaleMenu().size())
+            return;
+        scales.push_back (-1);
+    }
+    dropPrefetch();
+    sendChangeMessage();
+}
+
+void VitalRandomizerProcessor::removeScaleChoice (size_t index)
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        // The last one stays. An empty list has no sensible reading, and the
+        // one that means "anything" is already there as Random.
+        if (scales.size() <= 1 || index >= scales.size())
+            return;
+        scales.erase (scales.begin() + (long) index);
+    }
+    dropPrefetch();
+    sendChangeMessage();
+}
+
 void VitalRandomizerProcessor::setLocked (schema::Section section, bool locked)
 {
     dropPrefetch();
@@ -715,6 +777,7 @@ void VitalRandomizerProcessor::getStateInformation (juce::MemoryBlock& destData)
             j["sliders"][s.first.toStdString()] = s.second;
         for (const auto& l : locks)
             j["locks"].push_back (schema::sectionName (l));
+        j["scales"] = scales;
     }
 
     j["candidates"] = candidateStore.toJson();
@@ -751,6 +814,8 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
         if (j.contains ("locks") && j["locks"].is_array())
             for (const auto& l : j["locks"])
                 locks.insert (schema::sectionFromName (l.get<std::string>()));
+        if (j.contains ("scales") && j["scales"].is_array() && ! j["scales"].empty())
+            scales = j["scales"].get<std::vector<int>>();
     }
 
     varyDepth = j.value ("vary", 0.25f);

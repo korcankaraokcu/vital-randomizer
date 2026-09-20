@@ -49,6 +49,16 @@ Then rescan plugins in your DAW.
   patches sit in the KEPT row: click one to load it, right click to remove it.
   A star holds the patch as it stands, so anything you changed by hand in
   Vital's own GUI is kept too.
+- **SCALES** appears on the Sequence style and says which scales a riff may be
+  built on. It starts on **Random scale**, which is the whole table of them.
+  **+** adds
+  another dropdown and **-** takes the last one away, so picking, say, blues and
+  dorian means every sequence walks one or the other and nothing else. One
+  Two entries in the list are not scales. **random steps** draws every step on
+  its own and snaps it to the nearest semitone, which leaps about the way a
+  machine does rather than the way a player would, and **random quarter tones**
+  does the same on the grid halfway between the semitones, so about half the
+  steps land on pitches the keyboard has no key for.
 - **EXPORT** writes the current patch to a `.vital` file.
 - **...** locates Vital if it moved.
 

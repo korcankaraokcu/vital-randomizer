@@ -69,6 +69,10 @@ private:
 
     void refreshStyles();
     void refreshFromProcessor();
+    /** Bring the scale row in line with the processor, and show or hide it. */
+    void refreshScales();
+    /** How tall the strip is, which depends on whether the scale row is up. */
+    int stripHeight() const;
     void attachVitalEditor();
     void showSettingsMenu();
     void exportCurrent();
@@ -92,6 +96,19 @@ private:
         std::unique_ptr<juce::TextButton> button;
     };
     std::vector<LockControl> lockControls;
+
+    /*  The scales a sequence may walk, one dropdown each.
+
+        Only up for Sequence, because it is the only style that walks a scale
+        at all and a row of dead controls on every other style would be worse
+        than no row. The strip grows to make room for it and shrinks again,
+        which keeps the rest of the panel where the user left it.
+    */
+    std::vector<std::unique_ptr<juce::ComboBox>> scaleBoxes;
+    juce::Label scaleLabel;
+    juce::TextButton addScaleButton { "+" };
+    juce::TextButton removeScaleButton { "-" };
+    bool scaleRowUp = false;
 
     juce::TextButton rollButton { "ROLL" };
     juce::TextButton varyButton { "VARY" };

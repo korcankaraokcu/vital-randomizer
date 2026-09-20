@@ -123,6 +123,29 @@ fresh install is all it needs. Then:
 - **< >** walk the candidate history and **KEEP** stars one so rolling cannot
   lose it. Starred patches sit in the KEPT row: click to load, right click to
   remove.
+- A sequence is one held note with an LFO doing the playing, so anything that
+  fires on a key press fires once and shapes the first step only. Its sample
+  layer is drawn from the models that keep sounding rather than the struck and
+  plucked one-shots the played styles use, and an envelope reaching a level, a
+  cutoff, a resonance or the drive gets a sustain floor. Both used to read as a
+  loud pluck at the start and the layer then dropping out.
+- **SCALES**, on the Sequence style only, lists the scales a riff may be built
+  on. Each dropdown defaults to **Random scale**, meaning the whole table, which
+  is a different thing from the two entries in the table that are called random
+  and pick notes rather than scales; **+** adds
+  another and **-** removes the last, and each roll draws one entry off the
+  list. **random steps** and **random quarter tones** are the odd ones out and
+  keep the behaviour the scales replaced: no ladder, no contour, each step its
+  own draw. The semitone one is snapped by Vital's own quantiser with all
+  twelve bits set; the quarter tone one is placed by hand with the quantiser
+  off, because that quantiser is a twelve bit mask and cannot express a
+  half. A riff has to
+  play enough of its scale to be recognisable as that
+  scale, so the scale carries a floor: three notes of a three or four note
+  chord, four of a five or six note scale, five of anything larger. The step
+  count starts one above that floor, and a line that comes up short has its
+  repeats spent on degrees it has not played yet. Naming a scale changes only the notes the sequence walks, so the same
+  seed gives the same patch with a different set of intervals in it.
 - **EXPORT** writes the current patch to a `.vital` file.
 - **...** locates Vital if it moved.
 
@@ -487,6 +510,17 @@ no crossfade hides.
 `vrtest --models=<dir>` writes three bare presets for each model, with the
 oscillators, filters and effects taken out, because a layer is normally heard
 under two oscillators and a reverb and that is the wrong way to judge one.
+
+The sequence side has the same pair of demos, and they are the opposite way
+round: everything else is left in and one thing is pinned, because a scale
+played through nothing is a test tone and says nothing about whether it works
+in a patch. `vrtest --scales=<dir>` writes one sequence per scale on a single
+seed, so the only difference between two files is the set of intervals.
+`vrtest --gestures=<dir>` writes one per gesture and six more with the phrases
+left to fall where they will, and `--gesture-scale=<name>` says which scale
+they walk. It defaults to minor pentatonic, which has no wrong note in it and
+so gets out of the way, but the note floor bites hardest on the seven note
+scales and that is where these are worth running.
 
 ## What makes a bass a bass
 

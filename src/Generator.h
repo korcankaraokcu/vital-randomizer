@@ -4,6 +4,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -42,6 +43,13 @@ namespace gen
         const nlohmann::json* base = nullptr;             // VARY starts from this
         std::set<schema::Section> varySections;
         unsigned int seed = 0;                            // 0 picks one
+        /*  Which scale a sequence walks. Negative picks one, which is what
+            generating a patch wants; naming it is for hearing a scale on its
+            own with the rest of the patch held still. */
+        int scale = -1;
+        /*  Which shape the line takes. Negative picks one. Naming it is for
+            hearing one gesture against another with everything else held. */
+        int gesture = -1;
         std::string name;
     };
 
@@ -53,6 +61,11 @@ namespace gen
         std::array<std::string, kMacros> macroNames {};
         std::array<std::string, kMacros> macroDests {};
         int routings = 0;
+        /*  The scale a sequence ended up walking, as an index into
+            sequenceScales(). Reported rather than assumed, because a request
+            that asked for a random scale has no other way of saying which one
+            it got, and history has to replay the same one. */
+        int scale = -1;
         bool ok = false;
         std::string error;
     };
@@ -85,7 +98,12 @@ namespace gen
                           nlohmann::json& settings, std::mt19937& rng);
         void wireMacros (const Request& r, nlohmann::json& doc,
                          nlohmann::json& settings, Result& result);
-        void constrainPitch (const Request& r, nlohmann::json& settings, std::mt19937& rng);
+        void constrainPitch (const Request& r, nlohmann::json& settings, std::mt19937& rng,
+                             int& scaleUsed);
+        /** Put every pitched voice on the same steps, so the riff is the patch
+            rather than something happening behind a held note. */
+        void carrySequenceToEveryVoice (nlohmann::json& settings,
+                                        const std::string& driver, float depth);
         void scaleModulationDepth (const Request& r, nlohmann::json& settings);
         void tameDriveModulation (nlohmann::json& settings);
         void keepStruckNotesStruck (const Request& r, nlohmann::json& settings);
@@ -93,6 +111,36 @@ namespace gen
 
         nlohmann::json initPreset;
     };
+
+    /** A named set of intervals, in semitones above the note played. May be
+        fractional, which is what a maqam needs. */
+    struct Scale
+    {
+        const char* name;
+        std::vector<float> degrees;
+        /*  For the entries with no degrees, how far apart the steps may land,
+            in semitones.
+
+            A whole semitone is left to Vital's own quantiser, which is a twelve
+            bit mask and so cannot express anything narrower. Anything smaller
+            has to be placed by hand, with the quantiser switched off, the same
+            way the maqamat place their quarter tones.
+        */
+        float randomStep = 0.0f;
+    };
+
+    /** Every scale a sequence may be built on. */
+    const std::vector<Scale>& sequenceScales();
+
+    /*  The same scales with the repeats taken out, each paired with its index
+        into the table above.
+
+        The table repeats a few entries so that a random pick leans toward the
+        ones that survive a random walk. A menu offering "minor pentatonic"
+        twice would just look like a mistake, so anything a person reads gets
+        this list instead.
+    */
+    const std::vector<std::pair<std::string, int>>& sequenceScaleMenu();
 
     /** Bend a uniform percentile toward one end without piling up on it. */
     float skew (float p, float pull);

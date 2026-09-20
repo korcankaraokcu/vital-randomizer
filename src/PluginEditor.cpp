@@ -5,6 +5,8 @@
 namespace
 {
     constexpr int kStripHeight = 130;
+    // What the strip gains when the scale row comes up.
+    constexpr int kScaleRowHeight = 30;
     constexpr int kMinWidth = 900;
 
     const juce::Colour kBack       { 0xff141619 };
@@ -299,6 +301,28 @@ VitalRandomizerEditor::VitalRandomizerEditor (VitalRandomizerProcessor& p)
     keeperLabel.setFont (juce::FontOptions (11.0f));
     addAndMakeVisible (keeperLabel);
 
+    scaleLabel.setText ("SCALES", juce::dontSendNotification);
+    scaleLabel.setColour (juce::Label::textColourId, kTextDim);
+    scaleLabel.setFont (juce::FontOptions (11.0f));
+    addChildComponent (scaleLabel);
+
+    for (auto* b : { &addScaleButton, &removeScaleButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId, kBack);
+        b->setColour (juce::TextButton::textColourOffId, kText);
+        addChildComponent (*b);
+    }
+    addScaleButton.setTooltip ("Offer the roll one more scale to choose from");
+    removeScaleButton.setTooltip ("Take the last scale off the list");
+    addScaleButton.onClick = [this] { proc.addScaleChoice(); refreshScales(); };
+    removeScaleButton.onClick = [this]
+    {
+        const auto count = proc.scaleChoices().size();
+        if (count > 1)
+            proc.removeScaleChoice (count - 1);
+        refreshScales();
+    };
+
     statusLabel.setColour (juce::Label::textColourId, kTextDim);
     statusLabel.setFont (juce::FontOptions (11.0f));
     addAndMakeVisible (statusLabel);
@@ -311,9 +335,11 @@ VitalRandomizerEditor::VitalRandomizerEditor (VitalRandomizerProcessor& p)
     proc.addChangeListener (this);
     refreshStyles();
 
+    refreshScales();
+
     setResizable (true, true);
-    setResizeLimits (kMinWidth, kStripHeight + 260, 3000, 2200);
-    setSize (vitalWidth, vitalHeight + kStripHeight);
+    setResizeLimits (kMinWidth, stripHeight() + 260, 3000, 2200);
+    setSize (vitalWidth, vitalHeight + stripHeight());
 
     startTimerHz (8);
 }
@@ -341,7 +367,7 @@ void VitalRandomizerEditor::attachVitalEditor()
         addAndMakeVisible (*vitalEditor);
         vitalWidth = juce::jmax (kMinWidth, editor->getWidth());
         vitalHeight = juce::jmax (260, editor->getHeight());
-        setSize (vitalWidth, vitalHeight + kStripHeight);
+        setSize (vitalWidth, vitalHeight + stripHeight());
         resized();
     }
 }
@@ -363,6 +389,85 @@ void VitalRandomizerEditor::refreshStyles()
         ++id;
     }
     styleBox.setSelectedId (selected, juce::dontSendNotification);
+}
+
+int VitalRandomizerEditor::stripHeight() const
+{
+    return kStripHeight + (scaleRowUp ? kScaleRowHeight : 0);
+}
+
+void VitalRandomizerEditor::refreshScales()
+{
+    const auto wanted = proc.style() == "Sequence";
+    const auto chosen = proc.scaleChoices();
+    const auto& menu = gen::sequenceScaleMenu();
+    const auto before = scaleBoxes.size();
+
+    // Only build or drop a box when the count has actually moved. This runs
+    // eight times a second off the timer, and rebuilding a row of combo boxes
+    // that often would close one the moment a user opened it.
+    while (scaleBoxes.size() < chosen.size())
+    {
+        auto box = std::make_unique<juce::ComboBox>();
+        box->setColour (juce::ComboBox::backgroundColourId, kBack);
+        box->setColour (juce::ComboBox::textColourId, kText);
+        // Named for what it picks, because two of the scales below are
+        // themselves called random and mean something else entirely: this one
+        // chooses a scale, those two throw the notes.
+        box->addItem ("Random scale", 1);
+        for (int i = 0; i < (int) menu.size(); ++i)
+            box->addItem (juce::String (menu[(size_t) i].first), i + 2);
+        box->setTooltip ("A scale the roll may walk. Random scale takes the whole table.");
+
+        const auto slot = scaleBoxes.size();
+        auto* raw = box.get();
+        box->onChange = [this, slot, raw]
+        {
+            const auto id = raw->getSelectedId();
+            const auto& entries = gen::sequenceScaleMenu();
+            // Item one is Random scale, which the generator reads as a free choice.
+            proc.setScaleChoice (slot, id <= 1 ? -1 : entries[(size_t) (id - 2)].second);
+        };
+        addChildComponent (*box);
+        scaleBoxes.push_back (std::move (box));
+    }
+    while (scaleBoxes.size() > chosen.size())
+        scaleBoxes.pop_back();
+
+    for (size_t i = 0; i < scaleBoxes.size(); ++i)
+    {
+        int id = 1;
+        for (int m = 0; m < (int) menu.size(); ++m)
+            if (menu[(size_t) m].second == chosen[i])
+            {
+                id = m + 2;
+                break;
+            }
+        if (scaleBoxes[i]->getSelectedId() != id)
+            scaleBoxes[i]->setSelectedId (id, juce::dontSendNotification);
+        scaleBoxes[i]->setVisible (wanted);
+    }
+
+    scaleLabel.setVisible (wanted);
+    addScaleButton.setVisible (wanted);
+    removeScaleButton.setVisible (wanted);
+    addScaleButton.setEnabled (chosen.size() < menu.size());
+    removeScaleButton.setEnabled (chosen.size() > 1);
+
+    // Laying out again is only worth it when the row itself has moved, which
+    // is on a click rather than on every one of the timer's eight ticks.
+    const auto moved = wanted != scaleRowUp || before != scaleBoxes.size();
+    if (wanted != scaleRowUp)
+    {
+        scaleRowUp = wanted;
+        // The floor moves with the row, or dragging the window down to it
+        // would take the thirty pixels back out of Vital's editor.
+        setResizeLimits (kMinWidth, stripHeight() + 260, 3000, 2200);
+        if (getWidth() > 0)
+            setSize (getWidth(), getHeight() + (wanted ? kScaleRowHeight : -kScaleRowHeight));
+    }
+    if (moved)
+        resized();
 }
 
 void VitalRandomizerEditor::refreshFromProcessor()
@@ -402,6 +507,7 @@ void VitalRandomizerEditor::refreshFromProcessor()
 
     if (styleBox.getNumItems() == 0)
         refreshStyles();
+    refreshScales();
 
     {
         std::vector<juce::String> kept;
@@ -488,16 +594,16 @@ void VitalRandomizerEditor::paint (juce::Graphics& g)
 {
     g.fillAll (kBack);
     g.setColour (kPanel);
-    g.fillRect (0, 0, getWidth(), kStripHeight);
+    g.fillRect (0, 0, getWidth(), stripHeight());
     g.setColour (juce::Colours::black.withAlpha (0.5f));
-    g.drawHorizontalLine (kStripHeight - 1, 0.0f, (float) getWidth());
+    g.drawHorizontalLine (stripHeight() - 1, 0.0f, (float) getWidth());
 
     if (vitalEditor == nullptr)
     {
         g.setColour (kTextDim);
         g.setFont (juce::FontOptions (14.0f));
         g.drawText (proc.status().vitalReady ? "Opening Vital..." : proc.status().message,
-                    getLocalBounds().withTrimmedTop (kStripHeight),
+                    getLocalBounds().withTrimmedTop (stripHeight()),
                     juce::Justification::centred);
     }
 }
@@ -505,7 +611,7 @@ void VitalRandomizerEditor::paint (juce::Graphics& g)
 void VitalRandomizerEditor::resized()
 {
     auto area = getLocalBounds();
-    auto strip = area.removeFromTop (kStripHeight).reduced (8, 6);
+    auto strip = area.removeFromTop (stripHeight()).reduced (8, 6);
 
     auto topRow = strip.removeFromTop (24);
     styleLabel.setBounds (topRow.removeFromLeft (40));
@@ -546,6 +652,32 @@ void VitalRandomizerEditor::resized()
     starButton.setBounds (midRow.removeFromLeft (60).reduced (2, 0));
     midRow.removeFromLeft (10);
     filmstrip.setBounds (midRow.reduced (2, 1));
+
+    /*  The scale row, when the style is one that walks a scale.
+
+        It sits under the transport rather than up beside the style box because
+        it comes and goes, and a control that appears in the middle of a row
+        pushes everything after it sideways.
+    */
+    if (scaleRowUp)
+    {
+        strip.removeFromTop (5);
+        auto scaleRow = strip.removeFromTop (24);
+        scaleLabel.setBounds (scaleRow.removeFromLeft (46));
+
+        const auto count = juce::jmax (1, (int) scaleBoxes.size());
+        // Wide enough to read a name, narrower when there are several, and
+        // never so wide that four of them run off the end of the strip. The
+        // sixty is the pair of buttons, which sit against the last dropdown
+        // rather than against the edge of the window.
+        const auto width = juce::jlimit (86, 150, (scaleRow.getWidth() - 60) / count);
+        for (auto& box : scaleBoxes)
+            box->setBounds (scaleRow.removeFromLeft (width).reduced (2, 1));
+
+        scaleRow.removeFromLeft (6);
+        addScaleButton.setBounds (scaleRow.removeFromLeft (26).reduced (2, 1));
+        removeScaleButton.setBounds (scaleRow.removeFromLeft (26).reduced (2, 1));
+    }
 
     strip.removeFromTop (5);
     auto keeperRow = strip.removeFromTop (22);

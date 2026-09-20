@@ -15,6 +15,7 @@ namespace store
         for (const auto& l : locks)
             r.locks.insert (schema::sectionFromName (l));
         r.name = label;
+        r.scale = scale;
         return r;
     }
 
@@ -29,6 +30,7 @@ namespace store
         for (const auto& l : r.locks)
             recipe.locks.push_back (schema::sectionName (l));
         recipe.label = r.name;
+        recipe.scale = r.scale;
         return recipe;
     }
 
@@ -40,6 +42,7 @@ namespace store
         j["seed"] = seed;
         j["locks"] = locks;
         j["label"] = label;
+        j["scale"] = scale;
         for (const auto& s : sliders)
             j["sliders"][s.first] = s.second;
         return j;
@@ -52,6 +55,7 @@ namespace store
         r.amount = j.value ("amount", 1.0f);
         r.seed = j.value ("seed", 0u);
         r.label = j.value ("label", std::string {});
+        r.scale = j.value ("scale", -1);
         if (j.contains ("locks") && j["locks"].is_array())
             r.locks = j["locks"].get<std::vector<std::string>>();
         if (j.contains ("sliders") && j["sliders"].is_object())

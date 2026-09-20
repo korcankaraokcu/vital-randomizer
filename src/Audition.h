@@ -117,6 +117,15 @@ namespace audition
         float stepSalience = 0.0f;
         float stepErrorSemitones = 0.0f;
         float stepOffGridSemitones = 0.0f;
+        /*  The same against quarter tones rather than semitones.
+
+            A sequence may walk a maqam, whose thirds and sevenths sit half flat
+            on purpose. Judged against twelve notes those steps are all wrong;
+            against twenty four they are exactly where they were put. The
+            tolerance that goes with this is tighter, because the grid is twice
+            as dense and a loose one would wave anything through.
+        */
+        float stepOffQuarterSemitones = 0.0f;
         int steps = 0;
         bool silent = false;
         bool clickOnly = false;

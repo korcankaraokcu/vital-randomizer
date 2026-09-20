@@ -59,6 +59,15 @@ namespace gen
             return {};
         }
 
+        bool modDestExists (const nlohmann::json& mods, const std::string& source,
+                            const std::string& dest)
+        {
+            for (const auto& slot : mods)
+                if (modSource (slot) == source && modDest (slot) == dest)
+                    return true;
+            return false;
+        }
+
         bool setModSlot (nlohmann::json& settings, const std::string& source,
                          const std::string& dest, float amount, bool bipolar)
         {
@@ -66,6 +75,20 @@ namespace gen
                 return false;
 
             auto& mods = settings["modulations"];
+
+            /*  One slot per pair, because Vital adds them up.
+
+                Two slots carrying the same source to the same destination are
+                not a stronger connection shown twice, they are two connections
+                that sum: an LFO at 0.83 and the same LFO at 0.36 on one
+                oscillator's level reach past full scale between them and pin it
+                there. Vital's own editor shows one line for the pair, so the
+                second is invisible as well as wrong, and it costs a slot that
+                could have moved something else.
+            */
+            if (modDestExists (mods, source, dest))
+                return false;
+
             for (int slot = 0; slot < kModSlots; ++slot)
             {
                 const auto index = static_cast<size_t> (slot);
@@ -182,11 +205,23 @@ namespace gen
                 Zero means the style has no limit.
             */
             float attackCeiling;
+            /*  And the hard limit on how little of a note may be left.
+
+                The opposite problem, and the one a held riff has. Leaning the
+                sustain long only shifts the odds, and a sequence that drew 0.08
+                decayed to a twelfth of itself inside a second. Every layer goes
+                at once, because this is the amplitude envelope and the whole
+                riff is one note being held, so what is left is an attack and
+                then most of a bar of nothing. Zero means the style has no
+                limit, which is right for everything that is played a note at a
+                time.
+            */
+            float sustainFloor;
         };
 
         NoteShape noteShapeFor (const std::string& style)
         {
-            //                        attack  decay  sustain release susCeil relLo relHi  decLo decHi atkHi
+            //                        attack  decay  sustain release susCeil relLo relHi  decLo decHi atkHi susLo
             // The decay ceiling comes down with it. At 1.29 a bass took 2.4s to
             // fall to a tenth, and the ones that sound right fall in 0.6 to 0.9.
             if (style == "Bass")       return { -0.5f, +0.3f, -1.0f, -0.4f, 0.0f,  0.15f, 0.45f, 1.08f, 1.20f, 0.16f };
@@ -194,7 +229,7 @@ namespace gen
             if (style == "Keys")       return { -0.4f, +0.1f, -0.6f, -0.2f, 0.55f, 0.20f, 0.0f,  1.00f, 1.28f, 0.35f };
             if (style == "Lead")       return { -0.1f, +0.2f, +0.4f, +0.3f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
             if (style == "Pad")        return { +0.7f, +0.5f, +0.7f, +0.6f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f };
-            if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.25f };
+            if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.25f, 0.70f };
             return { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
         }
 
@@ -610,6 +645,15 @@ namespace gen
                 settings["env_1_attack"] = shape.attackCeiling * (0.3f + 0.7f * uniform (rng));
         }
 
+        // The riff is one held note, so this is the level the riff plays at.
+        if (shape.sustainFloor > 0.0f && settings.contains ("env_1_sustain"))
+        {
+            const auto sustain = settings["env_1_sustain"].get<float>();
+            if (sustain < shape.sustainFloor)
+                settings["env_1_sustain"] = shape.sustainFloor
+                                                + (1.0f - shape.sustainFloor) * uniform (rng);
+        }
+
         // A struck sound gets no sustain at all, not merely a small one. Even a
         // sixth of the peak held forever is a note that never stops.
         if (shape.sustainCeiling < 1.0f && settings.contains ("env_1_sustain"))
@@ -886,8 +930,105 @@ namespace gen
         }
     }
 
+    const std::vector<Scale>& sequenceScales()
+    {
+        /*  The scales a sequence may walk.
+
+            The steps used to be chosen at random and snapped to the nearest
+            semitone by Vital's quantiser with every bit of its mask set. That
+            is a scale of everything, which is why a sequence sounded like it
+            was picking notes rather than playing them.
+
+            Now the interval is chosen first and the step placed exactly where
+            it falls, which is also what lets a maqam in: a quarter tone is not
+            a semitone and no twelve bit mask can hold one.
+
+            Weighted toward what stays musical under a random walk, since that
+            is what a stepped LFO is. A pentatonic has no wrong note in it; a
+            major scale has a semitone that wants arriving at rather than
+            jumping to. The maqamat are the 24-TET approximations theory uses,
+            and real practice varies the intonation by region and player, so
+            these are a fair rendering rather than the last word.
+        */
+        static const std::vector<Scale> scales = {
+            { "minor pentatonic",  { 0, 3, 5, 7, 10 } },
+            { "minor pentatonic",  { 0, 3, 5, 7, 10 } },
+            { "major pentatonic",  { 0, 2, 4, 7, 9 } },
+            { "major pentatonic",  { 0, 2, 4, 7, 9 } },
+            { "natural minor",     { 0, 2, 3, 5, 7, 8, 10 } },
+            { "natural minor",     { 0, 2, 3, 5, 7, 8, 10 } },
+            { "dorian",            { 0, 2, 3, 5, 7, 9, 10 } },
+            { "phrygian",          { 0, 1, 3, 5, 7, 8, 10 } },
+            { "blues",             { 0, 3, 5, 6, 7, 10 } },
+            { "major",             { 0, 2, 4, 5, 7, 9, 11 } },
+            { "mixolydian",        { 0, 2, 4, 5, 7, 9, 10 } },
+            { "lydian",            { 0, 2, 4, 6, 7, 9, 11 } },
+            { "harmonic minor",    { 0, 2, 3, 5, 7, 8, 11 } },
+            { "whole tone",        { 0, 2, 4, 6, 8, 10 } },
+            { "octatonic",         { 0, 1, 3, 4, 6, 7, 9, 10 } },
+            { "minor triad",       { 0, 3, 7, 12 } },
+            { "major triad",       { 0, 4, 7, 12 } },
+            { "diminished seventh",{ 0, 3, 6, 9 } },
+            { "augmented",         { 0, 4, 8 } },
+            // The quarter tone ones. Hijaz, Nahawand and Kurd are twelve tone
+            // maqamat and sit above with their western names.
+            { "maqam rast",        { 0, 2, 3.5f, 5, 7, 9, 10.5f } },
+            { "maqam bayati",      { 0, 1.5f, 3, 5, 7, 8, 10 } },
+            { "maqam saba",        { 0, 1.5f, 3, 4, 7, 8, 10 } },
+            { "maqam huzam",       { 0, 1.5f, 2.5f, 5, 6.5f, 8.5f, 11 } },
+            { "maqam hijaz",       { 0, 1, 4, 5, 7, 8, 10 } },
+            { "maqam nahawand",    { 0, 2, 3, 5, 7, 8, 11 } },
+            /*  No scale at all, which is where this started.
+
+                Every step drawn on its own and snapped to the nearest
+                semitone, so the line leaps about with nothing pulling it
+                anywhere. Walking a scale replaced it because it sounded like a
+                sequence picking notes rather than playing them, which it does,
+                but picking notes is a sound in its own right and a machine one
+                that none of the scales above will give you.
+
+                One entry among all of these, so a roll left on Random scale lands
+                here about as often as it lands on any single scale.
+            */
+            { "random steps",      {},  1.0f },
+            /*  The same again, on quarter tones.
+
+                Between every pair of semitones there is another step, so the
+                line lands on pitches the keyboard has no key for. The maqamat
+                above use the same quarter tone grid and sound like music
+                because they pick seven of them and stay there; this picks
+                freely from all twenty four, which is the sound of something
+                being tuned rather than played, and is the point of it.
+
+                Placed rather than quantised. Vital's quantiser works in whole
+                semitones and would round every one of these away.
+            */
+            { "random quarter tones", {}, 0.5f },
+        };;
+        return scales;
+    }
+
+    const std::vector<std::pair<std::string, int>>& sequenceScaleMenu()
+    {
+        static const std::vector<std::pair<std::string, int>> menu = []
+        {
+            std::vector<std::pair<std::string, int>> unique;
+            const auto& all = sequenceScales();
+            for (int i = 0; i < (int) all.size(); ++i)
+            {
+                const std::string name = all[(size_t) i].name;
+                const auto seen = std::any_of (unique.begin(), unique.end(),
+                                               [&] (const auto& e) { return e.first == name; });
+                if (! seen)
+                    unique.emplace_back (name, i);
+            }
+            return unique;
+        }();
+        return menu;
+    }
+
     void Generator::constrainPitch (const Request& r, nlohmann::json& settings,
-                                    std::mt19937& rng)
+                                    std::mt19937& rng, int& scaleUsed)
     {
         /*  Keep the note on the note.
 
@@ -924,46 +1065,149 @@ namespace gen
         if (pitchDrivers.empty() || ! sequenced)
             return;
 
-        // All twelve semitones, so a swept transpose lands on notes.
+        /*  A scale, not all twelve semitones.
+
+            The steps used to be chosen at random and snapped to the nearest
+            semitone by Vital's quantiser, with every bit of the mask set. That
+            is a scale of everything, which is why a sequence sounded like it was
+            picking notes rather than playing them.
+
+            Now the interval is chosen first, from a named scale, and the step is
+            placed exactly where that interval falls. Nothing is snapped, which
+            is what lets a maqam in: a quarter tone is not a semitone and no
+            twelve bit mask can hold one.
+
+            The masks lean toward scales that stay musical under a random walk,
+            which is what a stepped LFO is. A pentatonic has no wrong note in it;
+            a major scale has a semitone that wants arriving at rather than
+            jumping to. The maqamat are the 24-TET approximations that theory
+            uses, and real practice varies the intonation by region and player,
+            so these are a fair rendering rather than the last word.
+        */
+        /*  Drawn whether or not it is used.
+
+            Naming a scale must not change any other note in the patch, and
+            the only way to guarantee that is to take the same number out of
+            the stream either way. Skipping the draw when the scale is already
+            known would shift everything downstream of it, so a recipe replayed
+            from history would come back as a different sound.
+        */
+        const auto& all = sequenceScales();
+        const auto drawn = std::uniform_int_distribution<size_t> (0, all.size() - 1) (rng);
+        const auto chosen = r.scale >= 0 && r.scale < (int) all.size()
+                                ? (size_t) r.scale
+                                : drawn;
+        const auto& scale = all[chosen];
+        scaleUsed = (int) chosen;
+
+        /*  One depth, fixed, because the placement depends on it.
+
+            A step is put where it belongs by inverting the depth, so the depth
+            has to be known when the shape is written. A quarter of the range is
+            an octave either side of the played note, which is as far as a riff
+            travels before the ear loses the root.
+        */
+        constexpr float kSequenceDepth = 0.25f;
+
+        for (size_t i = 0; i < mods.size(); ++i)
+        {
+            if (modSource (mods[i]).empty() || ! axes::isPitchDestination (modDest (mods[i])))
+                continue;
+
+            /*  A riff belongs in transpose, not in tune.
+
+                Tune and detune range are fractions of a semitone wide. A
+                sequence written into one of them is a scale compressed into a
+                wobble, which is not a wrong note so much as no note at all, and
+                the depth below is calibrated against transpose in any case.
+            */
+            auto dest = modDest (mods[i]);
+            for (const auto* tail : { "_tune", "_detune_range" })
+            {
+                const std::string suffix = tail;
+                if (dest.size() > suffix.size()
+                    && dest.compare (dest.size() - suffix.size(), suffix.size(), suffix) == 0)
+                {
+                    const auto moved = dest.substr (0, dest.size() - suffix.size()) + "_transpose";
+                    if (settings.contains (moved)
+                        && ! modDestExists (mods, modSource (mods[i]), moved))
+                    {
+                        mods[i]["destination"] = moved;
+                        dest = moved;
+                    }
+                }
+            }
+
+            const auto n = std::to_string (i + 1);
+            settings["modulation_" + n + "_amount"] =
+                (float) settings.value ("modulation_" + n + "_amount", 0.0) < 0.0f
+                    ? -kSequenceDepth : kSequenceDepth;
+            settings["modulation_" + n + "_bipolar"] = 1.0;
+        }
+
+        /*  An envelope fires once, and the riff does not.
+
+            Everything above assumes the key is pressed for each note. A
+            sequence presses it once and lets the LFO do the playing, so an
+            envelope with no sustain opens the filter or lifts the level for the
+            first step and then shuts for every step after it. What that sounds
+            like is a loud pluck and then the layer going away, which is what it
+            is: the patch is shaped like a struck note and the part is not one.
+
+            The amplitude envelope already leans long for this style. These are
+            the other five, which nothing was holding, and only where they reach
+            something that decides how loud or how open the patch is. An
+            envelope on a wavetable position may decay as it likes; that is a
+            timbre settling, not the riff being cut off.
+        */
+        static const std::vector<std::regex> gates = {
+            std::regex (".*_level$"), std::regex ("^volume$"),
+            std::regex ("^filter_(\\d|fx)_cutoff$"),
+            std::regex ("^filter_(\\d|fx)_resonance$"),
+            std::regex ("^distortion_drive$"),
+        };
+
+        for (const auto& slot : mods)
+        {
+            const auto source = modSource (slot);
+            // Envelope one is the amplitude envelope and has its own rules.
+            if (source.rfind ("env_", 0) != 0 || source == "env_1")
+                continue;
+
+            const auto dest = modDest (slot);
+            auto gating = false;
+            for (const auto& rx : gates)
+                if (std::regex_match (dest, rx))
+                    gating = true;
+            if (! gating)
+                continue;
+
+            /*  Measured: at a floor of a half the worst layers still fell away
+                by more than double, and at seven tenths the collapse went from
+                two and a half times down to one and a bit. The envelope still
+                has its attack, which is a real accent on the first step, it
+                just no longer takes the rest of the riff with it.
+            */
+            const auto key = "env_" + source.substr (4) + "_sustain";
+            if (settings.contains (key) && settings.value (key, 1.0) < 0.70)
+                settings[key] = 0.70;
+        }
+
+        /*  Nothing to snap when the value is already exact, and snapping is
+            what would round a quarter tone away.
+
+            The exception is the scale with no degrees in it, where the step
+            lands wherever the draw put it and there is nothing to be exact
+            about. Every bit of the twelve set sends each step to its nearest
+            semitone, which is the difference between a machine playing notes
+            and a siren.
+        */
+        const auto quantize = std::abs (scale.randomStep - 1.0f) < 1.0e-4f ? 4095 : 0;
         for (const auto& osc : { "osc_1", "osc_2", "osc_3", "sample" })
         {
             const auto key = std::string (osc) + "_transpose_quantize";
             if (settings.contains (key))
-                settings[key] = 4095;
-        }
-
-        /*  A step has to be one note, and a wide unison is not one note.
-
-            The quantiser does its job: a stripped sequence lands within a
-            fiftieth of a semitone. What pulls it off the grid is the unison
-            underneath it, and turning that off brought every failing patch
-            straight back on. Sweeping it showed two things. The error climbs
-            steadily with the detune, and it is worse with fewer voices, because
-            two detuned voices beat against each other while eight average into
-            a cluster with a centre the ear can find.
-
-            Under about 2.5 nothing measured past 0.19 at any voice count, which
-            is half the limit. Hand-made sequences sit at a median of 2.54, so
-            this is where they already live.
-        */
-        for (const auto& osc : { "osc_1", "osc_2", "osc_3" })
-        {
-            const auto detune = std::string (osc) + "_unison_detune";
-            if (! settings.contains (detune))
-                continue;
-
-            /*  Two voices beat, eight blend.
-
-                The sweep was clear about this: at the same detune, two voices
-                land twice as far off the grid as eight, because two tones a
-                little apart are an interference and eight are a texture. So a
-                thin unison gets a narrow one, and only a thick one is allowed
-                to spread.
-            */
-            const auto voices = settings.value (std::string (osc) + "_unison_voices", 1.0);
-            const auto widest = voices < 4.0 ? 1.0f : 2.5f;
-            if (settings[detune].get<float>() > widest)
-                settings[detune] = widest;
+                settings[key] = quantize;
         }
 
         if (settings.contains ("lfos") && settings["lfos"].is_array())
@@ -974,9 +1218,119 @@ namespace gen
                 if (source.rfind ("lfo_", 0) != 0)
                     continue;
                 const auto index = std::atoi (source.c_str() + 4) - 1;
-                if (index >= 0 && index < (int) lfos.size())
-                    lfos[(size_t) index] = wavetable::createStepShape (rng);
+                if (index < 0 || index >= (int) lfos.size())
+                    continue;
+
+                {
+                    const auto shape = wavetable::createStepShape (
+                        rng, scale.degrees, kSequenceDepth, r.gesture, scale.randomStep);
+                    const auto stepCount = juce::jmax (1, (int) shape.value ("num_points", 2) / 2);
+                    lfos[(size_t) index] = shape;
+
+                    /*  A rate somebody could follow.
+
+                        MOVE flips the sync mode of any LFO, and on this one that
+                        is the difference between a sequence and a smear: free
+                        running it changed pitch twenty three times a second.
+                        Measured, a synced cycle lasts two to the power of seven
+                        minus the tempo, in seconds, so the tempo that puts one
+                        step on an eighth or a sixteenth at 120 BPM falls out of
+                        the step count.
+
+                        Working that through, a step lasts two to the power of
+                        seven minus this number, over four. Six is an eighth and
+                        seven is a sixteenth. Eight was in here as well and is a
+                        thirty second, which at five or six steps to the cycle
+                        arrives ten times a second and stops reading as notes.
+
+                        Rounded down rather than to nearest, because a step
+                        count that is not a power of two lands between two
+                        tempos and the ear forgives the slower one.
+                    */
+                    const auto perStep = uniform (rng) < 0.6f ? 7.0 : 6.0;   // sixteenths or eighths
+                    auto tempo = juce::jlimit (5, 9, (int) std::floor (
+                        perStep - std::log2 ((double) stepCount / 4.0)));
+
+                    /*  Then bounded by the step rather than by the tempo.
+
+                        Only whole tempos exist, so a step count between two of
+                        them gets pushed a whole octave and five steps at an
+                        eighth came out at four fifths of a second each, which
+                        wanders rather than repeats. Between a fifth of a second
+                        and three fifths a step reads as a riff at either end,
+                        so that is the range, and the tempo is moved until the
+                        step falls inside it.
+                    */
+                    const auto stepSeconds = [stepCount] (int t)
+                    { return std::pow (2.0, 7.0 - t) / (double) stepCount; };
+
+                    while (stepSeconds (tempo) > 0.60 && tempo < 9)
+                        ++tempo;
+                    while (stepSeconds (tempo) < 0.20 && tempo > 5)
+                        --tempo;
+
+                    const auto lfo = "lfo_" + std::to_string (index + 1) + "_";
+                    settings[lfo + "sync"] = 1.0;          // tempo, not free running
+                    settings[lfo + "tempo"] = (double) tempo;
+                    settings[lfo + "sync_type"] = 0.0;
+
+                    carrySequenceToEveryVoice (settings, source, kSequenceDepth);
+                }
             }
+        }
+    }
+
+    void Generator::carrySequenceToEveryVoice (nlohmann::json& settings,
+                                               const std::string& driver, float depth)
+    {
+        /*  If one voice steps and three hold, what you hear is a held note.
+
+            A sequence used to be one oscillator's transpose, and whatever else
+            the patch had switched on carried on sounding the note that was
+            played. Three static sources against one moving one is a drone with
+            a riff somewhere behind it, and a steady note is easier to hear than
+            a moving one at the same level anyway, so the riff loses twice.
+
+            Everything that is on and pitched now takes the same steps, at the
+            same depth and the same sign, so the patch moves as one instrument.
+            A pedal under a riff is a good sound and this gives it up, but the
+            style is called Sequence, and the sequence should be the thing you
+            hear.
+        */
+        auto& mods = settings["modulations"];
+
+        auto sign = 1.0f;
+        std::set<std::string> stepping;
+
+        for (size_t i = 0; i < mods.size(); ++i)
+        {
+            const auto dest = modDest (mods[i]);
+            if (modSource (mods[i]) != driver || ! axes::isPitchDestination (dest))
+                continue;
+
+            const auto amount = (float) settings.value (
+                "modulation_" + std::to_string (i + 1) + "_amount", 0.0);
+            if (amount < 0.0f)
+                sign = -1.0f;
+
+            for (const auto* name : { "osc_1", "osc_2", "osc_3", "sample" })
+                if (dest.rfind (std::string (name) + "_", 0) == 0)
+                    stepping.insert (name);
+        }
+
+        // Driving the whole voice at once already covers everything, and
+        // doubling it up per oscillator would step twice as far.
+        if (stepping.empty() || modDestExists (mods, driver, "voice_transpose"))
+            return;
+
+        for (const auto* name : { "osc_1", "osc_2", "osc_3", "sample" })
+        {
+            if (settings.value (std::string (name) + "_on", 0.0) < 0.5)
+                continue;
+            if (stepping.count (name) > 0)
+                continue;
+            setModSlot (settings, driver, std::string (name) + "_transpose",
+                        sign * depth, true);
         }
     }
 
@@ -1208,7 +1562,7 @@ namespace gen
         keepStruckNotesStruck (r, settings);
         tameDriveModulation (settings);
         applyNoteShape (r, settings, prng);
-        constrainPitch (r, settings, srng);
+        constrainPitch (r, settings, srng, result.scale);
         result.repairs = repair (settings);
 
         result.preset["preset_style"] = r.style;

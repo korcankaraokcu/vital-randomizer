@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
 #include <vector>
 
 #include <juce_core/juce_core.h>
@@ -320,24 +321,392 @@ namespace wavetable
         return table;
     }
 
-    nlohmann::json createStepShape (std::mt19937& rng)
+    std::vector<std::string> stepGestureNames()
+    {
+        return { "run", "arpeggio", "wander", "motif", "pedal" };
+    }
+
+    nlohmann::json createStepShape (std::mt19937& rng,
+                                    const std::vector<float>& degrees, float depth,
+                                    int gesture, float randomStep)
     {
         /*  Vital's line is a list of (x, y) pairs, and a pair of points sharing
             an x is a vertical jump. Two points per step, so each value is held
             flat and then jumped from.
         */
-        const auto steps = pick (rng, 2, 8);
+        /*  How much of the scale has to actually turn up.
+
+            A maqam is seven notes and what identifies it is the particular
+            ones, so a riff that lands on two of them is not in that maqam in
+            any way a listener could tell. A triad is three notes and a riff on
+            two of those is missing a third of the chord. Either way the scale
+            was chosen and then not played.
+
+            So every scale carries a floor, and it goes up with the size of the
+            scale rather than sitting at one number, because three notes out of
+            three is the whole chord while three out of seven is a fragment:
+
+                3 or 4 notes in the scale  ->  at least 3 of them
+                5 or 6                     ->  at least 4
+                7 or more                  ->  at least 5
+
+            Counted by pitch class, so the same note an octave up does not
+            count twice. A triad written as root, third, fifth, octave is three
+            notes and is asked for three.
+        */
+        const auto pitchClass = [] (float semitones)
+        {
+            // In quarter tones, as integers, because a maqam has notes between
+            // the semitones and floats do not compare cleanly.
+            return (int) std::lround (std::fmod ((double) semitones + 24.0, 12.0) * 4.0);
+        };
+
+        std::set<int> scaleClasses;
+        for (const auto d : degrees)
+            scaleClasses.insert (pitchClass (d));
+
+        const auto wantedNotes = juce::jlimit (3, 5, ((int) scaleClasses.size() + 3) / 2);
+
+        /*  Two is a trill rather than a sequence, and a pattern also needs one
+            step more than the notes it has to contain, or every step is a new
+            note and what comes out is a scale exercise rather than a riff.
+            Eight covers a bar of quavers, which is as long as a step pattern
+            reads as one idea.
+        */
+        const auto steps = pick (rng, juce::jmax (3, wantedNotes + 1), 8);
 
         nlohmann::json xy = nlohmann::json::array();
         nlohmann::json powers = nlohmann::json::array();
         int count = 0;
 
-        float previous = uniform (rng);
+        /*  Move like a line, not like a shuffle.
+
+            Choosing the right notes is only half of it. Dealt out and shuffled,
+            a scale still leaps about at random, and what that sounds like is a
+            scale being demonstrated rather than a part being played.
+
+            What separates the two is contour. A melody mostly moves by one step
+            of the scale, leaps now and then, repeats figures, and keeps coming
+            back to the tonic. So the shape is chosen first and the degrees are
+            walked rather than drawn: a run, an arpeggio, a wander, a repeated
+            motif, or a pedal against the root. Each is a thing players do, and
+            between them they cover most of what a sequence ever is.
+        */
+        juce::String shapeName;
+        std::vector<float> chosen;
+        chosen.reserve ((size_t) steps);
+
+        if (degrees.empty() || depth <= 1.0e-4f)
+        {
+            // No ladder, no contour, no gesture. Each step is its own draw.
+            shapeName = "random";
+
+            /*  A whole semitone is left to Vital, which snaps the draw for us
+                and is what this did before there were scales at all. A grid
+                narrower than that is below what its quantiser can say, so the
+                step is put exactly where it belongs instead, by the same
+                inversion the scales use.
+            */
+            const auto placed = randomStep > 1.0e-4f
+                                && std::abs (randomStep - 1.0f) > 1.0e-4f;
+            // An octave either side of the note played, which is what the
+            // depth allows and what the two octave ladder covers.
+            const auto rungs = placed ? (int) std::lround (24.0f / randomStep) : 0;
+
+            for (int i = 0; i < steps; ++i)
+            {
+                if (! placed)
+                {
+                    chosen.push_back (uniform (rng));
+                    continue;
+                }
+                const auto wanted = -12.0f + randomStep * (float) pick (rng, 0, rungs);
+                chosen.push_back (juce::jlimit (0.0f, 1.0f,
+                                                0.5f - wanted / (96.0f * depth)));
+            }
+        }
+        else
+        {
+            /*  Two octaves to move in, the scale and the one below it, so a run
+                has somewhere to go and a leap has somewhere to land. The depth
+                allows an octave either side of the played note, and this fills
+                exactly that.
+            */
+            std::vector<float> ladder;
+            for (const auto d : degrees)
+                ladder.push_back (d - 12.0f);
+            for (const auto d : degrees)
+                ladder.push_back (d);
+            std::sort (ladder.begin(), ladder.end());
+
+            const auto rungs = (int) ladder.size();
+            // Where the played note itself sits, which is what a line gravitates to.
+            auto home = 0;
+            for (int i = 0; i < rungs; ++i)
+                if (std::abs (ladder[(size_t) i]) < std::abs (ladder[(size_t) home]))
+                    home = i;
+
+            /*  One gesture per phrase, not per sequence.
+
+                Five shapes is a small vocabulary, and a sequence that is one of
+                them from beginning to end gives itself away quickly. Music does
+                not work that way either: a riff runs up and then sits on a
+                pedal, or states a motif and answers it with a descent.
+
+                So the steps are cut into one to three phrases and each is given
+                its own shape, each starting from wherever the last one finished
+                so the line stays joined up. Five gestures across three phrases
+                is a hundred and fifty five orderings before the lengths and the
+                scale are counted, which is enough to stop the ear predicting it.
+            */
+            /*  Named as it is built.
+
+                Vital shows the LFO's name in its editor, so writing the phrases
+                into it means the shape of a line can be read off the patch
+                rather than worked out from the points. "run + pedal" is a
+                better label than "Steps" for something that is a run and then a
+                pedal.
+            */
+            juce::StringArray phraseNames;
+
+            const auto walk = [&] (int gesture, int from, int count,
+                                   std::vector<int>& path) -> int
+            {
+                phraseNames.add (stepGestureNames()[(size_t) juce::jlimit (0, 4, gesture)]);
+                auto at = juce::jlimit (0, rungs - 1, from);
+
+                switch (gesture)
+                {
+                    case 0:
+                    {
+                        // A run. Straight up or down the scale, which is the most
+                        // obviously musical thing a sequence can do.
+                        const auto up = uniform (rng) < 0.5f;
+                        for (int i = 0; i < count; ++i)
+                        {
+                            path.push_back (at);
+                            at += up ? 1 : -1;
+                            // Turn around rather than run off the end.
+                            if (at < 0 || at >= rungs)
+                                at = juce::jlimit (0, rungs - 1, at - (up ? 2 : -2));
+                        }
+                        break;
+                    }
+                    case 1:
+                    {
+                        // An arpeggio, every other degree, which on most of these
+                        // scales is the chord inside them.
+                        const auto up = uniform (rng) < 0.5f;
+                        for (int i = 0; i < count; ++i)
+                        {
+                            path.push_back (at);
+                            at += up ? 2 : -2;
+                            if (at < 0 || at >= rungs)
+                                at = juce::jlimit (0, rungs - 1, home);
+                        }
+                        break;
+                    }
+                    case 2:
+                    {
+                        /*  A wander. Mostly one step, sometimes two, occasionally
+                            a leap, and pulled back toward the root when it strays,
+                            which is roughly what a melody does when nobody is
+                            counting.
+                        */
+                        for (int i = 0; i < count; ++i)
+                        {
+                            path.push_back (at);
+                            const auto roll = uniform (rng);
+                            auto move = roll < 0.55f ? 1 : roll < 0.8f ? 2 : pick (rng, 3, 5);
+                            if (uniform (rng) < 0.5f)
+                                move = -move;
+                            const auto away = at - home;
+                            if (std::abs (away) > 2 && uniform (rng) < 0.6f)
+                                move = away > 0 ? -std::abs (move) : std::abs (move);
+                            at = juce::jlimit (0, rungs - 1, at + move);
+                        }
+                        break;
+                    }
+                    case 3:
+                    {
+                        /*  A motif, stated and restated. Two or three notes
+                            repeated with the whole figure nudged along, which is
+                            what makes a sequence sound composed rather than
+                            ongoing.
+                        */
+                        const auto figure = pick (rng, 2, 3);
+                        std::vector<int> seed;
+                        auto cursor = at;
+                        for (int i = 0; i < figure; ++i)
+                        {
+                            seed.push_back (cursor);
+                            /*  Never nothing.
+
+                                Drawn from minus two to two, the step between the
+                                figure's notes could be zero, and a figure whose
+                                notes are the same note is not a figure. Restated
+                                twice that gave four of the same note in a row.
+                            */
+                            const auto away = pick (rng, 1, 2) * (uniform (rng) < 0.5f ? -1 : 1);
+                            cursor = juce::jlimit (0, rungs - 1, cursor + away);
+                        }
+                        auto shift = 0;
+                        for (int i = 0; i < count; ++i)
+                        {
+                            if (i > 0 && i % figure == 0)
+                                shift += pick (rng, -1, 1);
+                            at = juce::jlimit (0, rungs - 1, seed[(size_t) (i % figure)] + shift);
+                            path.push_back (at);
+                        }
+                        break;
+                    }
+                    default:
+                    {
+                        /*  A pedal. The root on every other step with the scale
+                            moving against it, which is most of what a bassline
+                            or an acid line is doing.
+
+                            The answering note climbs rather than being redrawn
+                            each time. Redrawn, it kept landing on the same
+                            degree, and a pedal that answers itself with one
+                            note is two notes long however many steps it has.
+                        */
+                        auto answer = pick (rng, 1, 3);
+                        for (int i = 0; i < count; ++i)
+                        {
+                            if (i % 2 == 0)
+                            {
+                                at = home;
+                            }
+                            else
+                            {
+                                at = juce::jlimit (0, rungs - 1, home + answer);
+                                answer += pick (rng, 1, 2);
+                                if (home + answer >= rungs)
+                                    answer = pick (rng, 1, 3);
+                            }
+                            path.push_back (at);
+                        }
+                        break;
+                    }
+                }
+                return at;
+            };
+
+            std::vector<int> path;
+            path.reserve ((size_t) steps);
+
+            if (gesture >= 0 && gesture < 5)
+            {
+                // Asked for one shape, so the whole line is that shape.
+                walk (gesture, home + pick (rng, -1, 1), steps, path);
+            }
+            else
+            {
+                // Short lines stay in one phrase; there is nothing to divide.
+                const auto roll = uniform (rng);
+                auto phrases = steps < 4 ? 1 : roll < 0.35f ? 1 : roll < 0.78f ? 2 : 3;
+                phrases = juce::jmin (phrases, steps / 2);
+                phrases = juce::jmax (1, phrases);
+
+                auto at = home + pick (rng, -1, 1);
+                auto left = steps;
+                for (int p = 0; p < phrases; ++p)
+                {
+                    const auto remaining = phrases - p - 1;
+                    const auto count = p == phrases - 1
+                                           ? left
+                                           : pick (rng, 2, juce::jmax (2, left - remaining * 2));
+                    at = walk (pick (rng, 0, 4), at, count, path);
+                    left -= count;
+                    if (left <= 0)
+                        break;
+                }
+            }
+
+            shapeName = phraseNames.joinIntoString (" + ");
+
+            /*  Then make sure the scale is actually in there.
+
+                The gestures are contours and none of them is counting notes.
+                A pedal answers the root, a motif restates itself, and a wander
+                that turns around early covers three rungs out of fourteen. Any
+                of those can finish a phrase having played two degrees of a
+                seven note maqam, and the scale is then a label on a patch
+                rather than something a listener can hear.
+
+                So the line is checked against the floor and short of it the
+                repeats are spent on degrees that have not been heard yet. The
+                first time each note appears is left alone, which is what keeps
+                the opening of the phrase intact, and the nearest unheard rung
+                is used so a repair is a step rather than a leap.
+            */
+            const auto classAt = [&] (int rung)
+            {
+                return pitchClass (ladder[(size_t) juce::jlimit (0, rungs - 1, rung)]);
+            };
+
+            const auto heard = [&]
+            {
+                std::set<int> present;
+                for (const auto rung : path)
+                    present.insert (classAt (rung));
+                return present;
+            };
+
+            for (int guard = 0; guard < 32; ++guard)
+            {
+                const auto present = heard();
+                if ((int) present.size() >= wantedNotes)
+                    break;
+
+                // The first step that says nothing new. Its own first outing
+                // stays; this is the one that only repeats it.
+                auto spare = -1;
+                std::set<int> seen;
+                for (size_t i = 0; i < path.size(); ++i)
+                    if (! seen.insert (classAt (path[i])).second)
+                    {
+                        spare = (int) i;
+                        break;
+                    }
+                if (spare < 0)
+                    break;
+
+                // The nearest rung carrying a degree nobody has played.
+                auto best = -1;
+                for (int rung = 0; rung < rungs; ++rung)
+                {
+                    if (present.count (classAt (rung)) > 0)
+                        continue;
+                    if (best < 0 || std::abs (rung - path[(size_t) spare])
+                                        < std::abs (best - path[(size_t) spare]))
+                        best = rung;
+                }
+                if (best < 0)
+                    break;
+
+                path[(size_t) spare] = best;
+            }
+
+            for (const auto rung : path)
+            {
+                const auto wanted = ladder[(size_t) juce::jlimit (0, rungs - 1, rung)];
+                chosen.push_back (juce::jlimit (0.0f, 1.0f,
+                                                0.5f - wanted / (96.0f * depth)));
+            }
+        }
+
+        int taken = 0;
+        const auto place = [&] () -> float
+        { return chosen[(size_t) (taken++ % (int) chosen.size())]; };
+
+        float previous = place();
         for (int i = 0; i < steps; ++i)
         {
             const auto x0 = (float) i / (float) steps;
             const auto x1 = (float) (i + 1) / (float) steps;
-            const auto value = i == 0 ? previous : uniform (rng);
+            const auto value = i == 0 ? previous : place();
 
             xy.push_back (x0); xy.push_back (value);
             xy.push_back (x1); xy.push_back (value);
@@ -348,7 +717,7 @@ namespace wavetable
         }
 
         nlohmann::json line;
-        line["name"] = "Steps";
+        line["name"] = shapeName.isEmpty() ? std::string ("Steps") : shapeName.toStdString();
         line["num_points"] = count;
         line["points"] = std::move (xy);
         line["powers"] = std::move (powers);

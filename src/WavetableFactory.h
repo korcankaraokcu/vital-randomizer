@@ -2,6 +2,7 @@
 
 #include <random>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -41,5 +42,22 @@ namespace wavetable
         rather than a sequence. Holding each value flat and jumping between them
         is what makes it sound like notes being played.
     */
-    nlohmann::json createStepShape (std::mt19937& rng);
+    /*  A stepped LFO whose steps land on named intervals.
+
+        `degrees` are semitones above the played note and may be fractional, so a
+        maqam's quarter tones are as easy to write as a minor third. `depth` is
+        the modulation amount the caller will wire, which is what decides how a
+        value between zero and one becomes a pitch.
+
+        Measured rather than assumed: at a bipolar amount A, a point at v moves
+        the note by (0.5 - v) * 96 * A semitones. So a wanted interval is placed
+        by inverting that, and the quantiser is left switched off, because there
+        is nothing to snap when the value is already exact.
+    */
+    nlohmann::json createStepShape (std::mt19937& rng,
+                                    const std::vector<float>& degrees, float depth,
+                                    int gesture = -1, float randomStep = 0.0f);
+
+    /** The shapes a line can take, in the order createStepShape numbers them. */
+    std::vector<std::string> stepGestureNames();
 }

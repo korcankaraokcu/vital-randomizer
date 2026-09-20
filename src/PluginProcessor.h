@@ -76,6 +76,19 @@ public:
     void setSlider (const juce::String& axis, float value);
     float slider (const juce::String& axis) const;
 
+    /*  Which scales a sequence is allowed to walk.
+
+        A list rather than one choice, because narrowing a randomizer to a
+        single scale narrows it too far: most people want it off the whole
+        table but away from the whole-tone and the maqamat, or inside two
+        modes and nothing else. Every entry is an index into
+        gen::sequenceScales(), and -1 means leave that draw to the roll.
+    */
+    std::vector<int> scaleChoices() const;
+    void setScaleChoice (size_t index, int scale);
+    void addScaleChoice();
+    void removeScaleChoice (size_t index);
+
     void setLocked (schema::Section section, bool locked);
     bool isLocked (schema::Section section) const;
 
@@ -156,6 +169,7 @@ private:
     juce::String currentStyle { "Bass" };
     juce::CriticalSection settingsLock;
     std::map<juce::String, float> sliders;
+    std::vector<int> scales { -1 };
     std::set<schema::Section> locks;
     std::atomic<float> varyDepth { 0.25f };
 

@@ -624,15 +624,31 @@ namespace sampler
         {
             allowed = { &bed, &vocal, &rising, &gritty };
         }
-        else if (request.style == "Keys" || request.style == "Lead"
-                 || request.style == "Sequence")
+        else if (request.style == "Sequence")
+        {
+            /*  Only what keeps sounding.
+
+                A sequence is one held note with an LFO doing the playing, so
+                the key goes down once and everything that fires on a key press
+                fires once. A struck body or a plucked string under that is a
+                loud attack on the first step and silence for the rest of the
+                riff, which is heard as the layer dropping out rather than as a
+                layer at all.
+
+                These three run for as long as the key is held, so the body is
+                under every step and not just the first.
+            */
+            allowed = { &bed, &gritty, &vocal };
+        }
+        else if (request.style == "Keys" || request.style == "Lead")
         {
             /*  Only what has a pitch.
 
                 A bed, a crackle or a vowel under a played melody is a second
                 sound sitting behind the note rather than part of it, and these
-                are the three styles somebody plays a line on. What is left is
-                what a player would layer in by hand: an attack, or a string.
+                are the two styles somebody plays a line on a key at a time.
+                What is left is what a player would layer in by hand: an attack,
+                or a string.
             */
             allowed = { &struck, &pluck };
             if (request.style == "Lead")

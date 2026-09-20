@@ -85,6 +85,7 @@ namespace audition
                 sum.stepSalience += m.stepSalience;
                 sum.stepErrorSemitones += m.stepErrorSemitones;
                 sum.stepOffGridSemitones += m.stepOffGridSemitones;
+                sum.stepOffQuarterSemitones += m.stepOffQuarterSemitones;
                 sum.steps = juce::jmax (sum.steps, m.steps);
             }
 
@@ -105,7 +106,7 @@ namespace audition
                              &sum.heldRatio, &sum.pitchHz, &sum.pitchSalience,
                              &sum.pitchErrorSemitones, &sum.pitchOffGridSemitones,
                              &sum.stepSalience, &sum.stepErrorSemitones,
-                             &sum.stepOffGridSemitones })
+                             &sum.stepOffGridSemitones, &sum.stepOffQuarterSemitones })
                 *v /= n;
         }
 
@@ -150,8 +151,9 @@ namespace audition
             0.45. Patches that sound clean measure 0.26 and up, so the bar sits
             under that rather than where the old inflated figure put it.
         */
+        // Judged on quarter tones, so the tolerance halves with the spacing.
         if (style == "Sequence")
-            return { true, 0.20f, 0.35f, false };
+            return { true, 0.20f, 0.18f, false };
         // A pad may be hazier about its pitch than a lead, but it still has to
         // be playing the note somebody pressed.
         if (style == "Pad")
@@ -717,7 +719,7 @@ namespace audition
             {
                 const auto step = (size_t) (0.09 * sampleRate);
                 const auto quiet = m.peak * 0.2f;
-                std::vector<float> saliences, octaveErrors, offGrids;
+                std::vector<float> saliences, octaveErrors, offGrids, offQuarters;
 
                 for (size_t at = from; at + step <= mono.size() && saliences.size() < 24u;
                      at += step)
@@ -737,6 +739,10 @@ namespace audition
                     saliences.push_back (salience);
                     octaveErrors.push_back (octaveError);
                     offGrids.push_back (offGrid);
+
+                    const auto semis = 12.0 * std::log2 (hz / expected);
+                    offQuarters.push_back ((float) std::abs (semis
+                                              - std::round (semis * 2.0) * 0.5));
                 }
 
                 const auto median = [] (std::vector<float>& v)
@@ -751,6 +757,7 @@ namespace audition
                     m.stepSalience = median (saliences);
                     m.stepErrorSemitones = median (octaveErrors);
                     m.stepOffGridSemitones = median (offGrids);
+                    m.stepOffQuarterSemitones = median (offQuarters);
                 }
             }
         }

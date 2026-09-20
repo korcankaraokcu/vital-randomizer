@@ -14,6 +14,7 @@
 #include <iostream>
 #include <algorithm>
 #include <functional>
+#include <set>
 #include <map>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include "../src/Audition.h"
 #include "../src/Archetypes.h"
 #include "../src/SampleFactory.h"
+#include "../src/WavetableFactory.h"
 #include "../src/Axes.h"
 #include "../src/Generator.h"
 #include "../src/Loudness.h"
@@ -171,6 +173,12 @@ int main (int argc, char** argv)
     */
     juce::File rejectsTo;
     juce::File modelsTo;
+    juce::File scalesTo;
+    juce::File gesturesTo;
+    // Which scale the gesture demo walks. The shapes read differently on a
+    // seven note maqam than on a pentatonic, and the note floor bites hardest
+    // on the big scales, so it has to be possible to ask for one.
+    juce::String gestureScale { "minor pentatonic" };
     for (int i = 1; i < argc; ++i)
     {
         const juce::String arg (argv[i]);
@@ -192,6 +200,9 @@ int main (int argc, char** argv)
                 complexity = value.getFloatValue();
         }
         if (arg.startsWith ("--models="))    modelsTo = juce::File (value);
+        if (arg.startsWith ("--scales="))    scalesTo = juce::File (value);
+        if (arg.startsWith ("--gestures=")) gesturesTo = juce::File (value);
+        if (arg.startsWith ("--gesture-scale=")) gestureScale = value;
         if (arg.startsWith ("--stats="))     statsRolls = value.getIntValue();
         if (arg.startsWith ("--rejects="))   rejectsTo = juce::File (value);
         if (arg.startsWith ("--axis="))      axisKey = value.trim();
@@ -301,6 +312,223 @@ int main (int argc, char** argv)
         rolled again into a different patch, and then the two sides are no longer
         the same patch with one slider moved.
     */
+    /*  One sequence per gesture, on one scale, so the shape of the line is the
+        only thing that differs.
+
+        Minor pentatonic throughout, because it has no wrong note in it and so
+        gets out of the way of the question being asked, which is what a run
+        sounds like next to a pedal.
+    */
+    if (gesturesTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+        gesturesTo.createDirectory();
+
+        const auto& scales = gen::sequenceScales();
+        int pentatonic = 0;
+        for (size_t i = 0; i < scales.size(); ++i)
+            if (juce::String (scales[i].name) == gestureScale)
+            {
+                pentatonic = (int) i;
+                break;
+            }
+        std::cout << "gestures on " << scales[(size_t) pentatonic].name << std::endl;
+
+        const auto names = wavetable::stepGestureNames();
+        for (size_t g = 0; g < names.size(); ++g)
+        {
+            gen::Request request;
+            request.style = "Sequence";
+            request.amount = 1.0f;
+            const auto preset = archetype::defaultSlidersFor ("Sequence");
+            request.sliders = {
+                { "bright", preset.bright }, { "dirt", preset.dirt },
+                { "space", preset.space },   { "move", preset.move },
+                { "complexity", preset.complexity } };
+            request.complexityWobble = 0.0f;
+            request.seed = 0x9E571Bu;
+            request.scale = pentatonic;
+            request.gesture = (int) g;
+            request.name = names[g];
+
+            auto result = generator.roll (request);
+            if (! result.ok)
+            {
+                std::cout << "  " << names[g] << ": " << result.error << std::endl;
+                continue;
+            }
+
+            host.applyPreset (result.preset);
+            audition::settle (*host.processor(), kSampleRate, kBlockSize);
+            const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+            loudness::normalise (result.preset["settings"], m.rms, m.peak);
+
+            auto out = result.preset;
+            out.erase ("tuning");
+            out["preset_name"] = names[g];
+            out["preset_style"] = "Sequence";
+            out["comments"] = "one gesture, " + gestureScale.toStdString()
+                              + ", everything else held still";
+
+            gesturesTo.getChildFile ("Gesture_" + juce::String (names[g]) + ".vital")
+                      .replaceWithText (juce::String (out.dump()));
+            std::cout << "  " << names[g] << std::endl;
+        }
+        /*  And some with the phrases left to fall where they will, which is
+            what a rolled sequence actually does. The five above are each one
+            shape end to end and exist to be compared against these.
+        */
+        for (int mixed = 1; mixed <= 6; ++mixed)
+        {
+            gen::Request request;
+            request.style = "Sequence";
+            request.amount = 1.0f;
+            const auto preset = archetype::defaultSlidersFor ("Sequence");
+            request.sliders = {
+                { "bright", preset.bright }, { "dirt", preset.dirt },
+                { "space", preset.space },   { "move", preset.move },
+                { "complexity", preset.complexity } };
+            request.complexityWobble = 0.0f;
+            request.seed = 0x9E571Bu + (unsigned int) mixed * 2654435761u;
+            request.scale = pentatonic;
+            request.gesture = -1;          // let it cut its own phrases
+            request.name = "mixed " + std::to_string (mixed);
+
+            auto result = generator.roll (request);
+            if (! result.ok)
+                continue;
+
+            host.applyPreset (result.preset);
+            audition::settle (*host.processor(), kSampleRate, kBlockSize);
+            const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+            loudness::normalise (result.preset["settings"], m.rms, m.peak);
+
+            /*  The LFO named itself while it was built, so which phrases it
+                chose is readable off the patch rather than worked out from its
+                points. Vital shows that name in its own editor too.
+            */
+            juce::String shape;
+            {
+                // The one wired at the pitch, not whichever is named something
+                // interesting: every patch has a Triangle in it somewhere.
+                const auto& mods = result.preset["settings"]["modulations"];
+                for (size_t k = 0; k < mods.size(); ++k)
+                {
+                    const auto source = mods[k].value ("source", std::string());
+                    const auto dest = mods[k].value ("destination", std::string());
+                    if (source.rfind ("lfo_", 0) != 0 || dest.find ("transpose") == std::string::npos)
+                        continue;
+
+                    const auto index = std::atoi (source.c_str() + 4) - 1;
+                    const auto& lfos = result.preset["settings"]["lfos"];
+                    if (index >= 0 && index < (int) lfos.size() && lfos[(size_t) index].contains ("name"))
+                        shape = juce::String (lfos[(size_t) index]["name"].get<std::string>());
+                    break;
+                }
+            }
+
+            auto out = result.preset;
+            out.erase ("tuning");
+            out["preset_name"] = "mixed: " + shape.toStdString();
+            out["preset_style"] = "Sequence";
+            out["comments"] = "phrases chosen freely, " + gestureScale.toStdString();
+
+            gesturesTo.getChildFile ("Mixed_" + juce::String (mixed) + "_"
+                                     + shape.replace (" + ", "-").replace (" ", "")
+                                     + ".vital")
+                      .replaceWithText (juce::String (out.dump()));
+            std::cout << "  mixed " << mixed << ":  " << shape << std::endl;
+        }
+
+        std::cout << "\nwritten to " << gesturesTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
+    /*  One sequence per scale, so a scale can be heard rather than read.
+
+        These are ordinary sequences apart from the scale being pinned: the
+        oscillator, the filter and the effects are left alone, because a scale
+        played through nothing is a test tone and tells you nothing about
+        whether it works in a patch. What is fixed is the scale, the step rate
+        and the seed, so the only thing that differs between two of these files
+        is the set of intervals.
+    */
+    if (scalesTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+        scalesTo.createDirectory();
+
+        const auto& scales = gen::sequenceScales();
+        std::set<std::string> written;
+
+        for (size_t i = 0; i < scales.size(); ++i)
+        {
+            const std::string name = scales[i].name;
+            if (! written.insert (name).second)
+                continue;       // the weighted ones appear more than once
+
+            gen::Request request;
+            request.style = "Sequence";
+            request.amount = 1.0f;
+            const auto preset = archetype::defaultSlidersFor ("Sequence");
+            request.sliders = {
+                { "bright", preset.bright }, { "dirt", preset.dirt },
+                { "space", preset.space },   { "move", preset.move },
+                { "complexity", preset.complexity } };
+            request.complexityWobble = 0.0f;
+            // One seed for all of them, so the patch is the same and only the
+            // intervals move.
+            request.seed = 0x5CA1E5u;
+            request.scale = (int) i;
+            // A run, every time. A sequence normally cuts itself into phrases
+            // with a shape each, which is the point of it, and the wrong thing
+            // for hearing what a scale is: that wants one walk straight up.
+            request.gesture = 0;
+            request.name = name;
+
+            auto result = generator.roll (request);
+            if (! result.ok)
+            {
+                std::cout << "  " << name << ": " << result.error << std::endl;
+                continue;
+            }
+
+            audition::Measurement m;
+            host.applyPreset (result.preset);
+            audition::settle (*host.processor(), kSampleRate, kBlockSize);
+            m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+            loudness::normalise (result.preset["settings"], m.rms, m.peak);
+
+            auto out = result.preset;
+            out.erase ("tuning");
+            out["preset_name"] = name;
+            out["preset_style"] = "Sequence";
+            out["comments"] = "one scale, everything else held still";
+
+            auto file = juce::String (name).replace (" ", "_");
+            scalesTo.getChildFile ("Scale_" + file + ".vital")
+                    .replaceWithText (juce::String (out.dump()));
+            std::cout << "  " << name << "  (" << scales[i].degrees.size()
+                      << " degrees)" << std::endl;
+        }
+        std::cout << "\nwritten to " << scalesTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
     /*  One preset per sample model, with everything else taken out.
 
         The layer is normally heard underneath two oscillators, a filter and a
@@ -693,7 +921,7 @@ int main (int argc, char** argv)
                     const auto stepped = audition::isSteppedStyle (style.toStdString())
                                              && m.steps > 0;
                     const auto salience = stepped ? m.stepSalience : m.pitchSalience;
-                    const auto pitchError = stepped ? m.stepOffGridSemitones
+                    const auto pitchError = stepped ? m.stepOffQuarterSemitones
                                           : pitch.octavesOnly ? m.pitchErrorSemitones
                                                               : m.pitchOffGridSemitones;
                     if (pitch.required
