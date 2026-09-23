@@ -366,19 +366,38 @@ namespace archetype
             /*  Vital's drive knob runs from -30 to +30 dB, so eleven sat at
                 about 68% of the way up it. A lead at 10.8 dB with the mix near
                 two thirds was still tearing after the modulation was tamed, so
-                the ceiling comes down to 60% of the knob, which is +6.
+                the ceiling came down to 60% of the knob, which is +6, and then
+                to 40%, which is -6, because it was still hot by ear.
 
-                Hand-made presets that use distortion sit at a median of 3.6 dB,
-                so this is still above what most of them ask for.
+                Judged by ear rather than by the number, because the number does
+                not see it. Rendered against the same patch with the effect
+                switched off, the distortion at +3 with the mix at 0.42 alters
+                the signal by more than the dry signal's own level, while the
+                crest factor the DIRT axis is scored on moves 0.75 dB across the
+                entire mix range and the share of energy above 2 kHz moves 3%.
+                Both of those say it is doing nothing. It is not.
+
+                The knob rests in its bottom third, 0% to 30%, which is -30 to
+                -12 dB, and nothing may take it past 40%. Where it rests was
+                never the problem: the band was ten points wide and the LFOs and
+                envelopes aimed at it were swinging seventeen to thirty five, so
+                two patches in the batch reached the top of the knob and one
+                reached the bottom. The ceiling is enforced against the swing
+                rather than against the resting place, in tameDriveModulation.
             */
-            { R"(^distortion_drive$)",                    0.0f,   6.0f },
-            /*  Fully wet distortion leaves nothing of the note underneath it.
-                A lead that measured as far too bright came back to something
-                usable simply by taking the distortion out, and the two things
-                doing the damage were the mix at the top of its range and the
-                drive being swung by a fast LFO. Both are held back now.
+            { R"(^distortion_drive$)",                  -30.0f, -12.0f },
+            /*  The mix is left alone, the whole knob.
+
+                It used to be held to the middle third, on the grounds that a
+                fully wet distortion leaves nothing of the note underneath it.
+                That was true when the drive sat in the top half of its knob,
+                where the shaping is violent enough that hearing only the shaped
+                signal is a different instrument. With the drive now resting in
+                the bottom third and capped at 40% however it is driven, wet is
+                a tone rather than a wreck, and the mix is the one control that
+                should be free to say how much of it you want.
             */
-            { R"(^distortion_mix$)",                      0.15f,  0.50f },
+            { R"(^distortion_mix$)",                      0.0f,   1.0f },
             { R"(^reverb_dry_wet$)",                      0.0f,   0.6f },
             { R"(^reverb_decay_time$)",                  -1.0f,   2.5f },
             { R"(^reverb_size$)",                         0.2f,   1.0f },

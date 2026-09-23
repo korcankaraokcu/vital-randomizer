@@ -735,20 +735,71 @@ namespace gen
             movement, it is the patch tearing. Depth is capped, and anything
             cyclic aimed at it is slowed to something that reads as the sound
             breathing rather than stuttering.
+
+            The depth used to be a flat 0.35, which sounds conservative and is
+            not. Vital's drive knob runs from -30 to +30 dB, so it is 60 dB from
+            end to end, and a depth is a fraction of that: 0.35 unipolar is 21 dB
+            of swing, better than a third of the knob, and 0.35 bipolar is 10.5
+            either way. Measured across a batch, the resting band was ten points
+            of knob wide and the modulation aimed at it was moving seventeen to
+            thirty five, so two patches drove the knob to its top and one to its
+            bottom, and what the resting place was set to hardly mattered.
+
+            So the cap is worked backwards from where the knob is allowed to
+            reach instead of being a number that looked small. The drive rests
+            in the bottom third and nothing may take it past 40%, which is -6 dB,
+            so each modulation gets a share of whatever headroom is left between
+            where this patch rests and that ceiling. Unipolar spans the whole 60
+            dB and bipolar half of it either side, verified against static
+            renders rather than assumed, so the two convert differently.
         */
         if (! settings.contains ("modulations") || ! settings["modulations"].is_array())
             return;
 
+        constexpr float kKnobDb = 60.0f;     // -30 to +30, confirmed by where it clamps
+        constexpr float kCeilingDb = -6.0f;  // 40% of the knob
+        constexpr float kFloorDb = -30.0f;   // 0%, where it stops going down
+
         auto& mods = settings["modulations"];
+
+        // Shared out, because two modulations on one destination add up.
+        auto aimed = 0;
+        for (const auto& slot : mods)
+            if (! modSource (slot).empty() && modDest (slot) == "distortion_drive")
+                ++aimed;
+        if (aimed == 0)
+            return;
+
+        /*  Bounded at both ends, not just the top.
+
+            A patch resting near the bottom of the knob with a bipolar
+            modulation deep enough to reach 40% also reaches well below 0%, and
+            below 0% is not quieter, it is the same silence over and over
+            because the knob has stopped. That is depth spent on nothing, and it
+            reads as the grit cutting out rather than moving.
+        */
+        const auto resting = (float) settings.value ("distortion_drive", 0.0);
+        const auto up = juce::jmax (0.0f, kCeilingDb - resting) / (float) aimed;
+        const auto down = juce::jmax (0.0f, resting - kFloorDb) / (float) aimed;
+
         for (size_t i = 0; i < mods.size(); ++i)
         {
             const auto source = modSource (mods[i]);
             if (source.empty() || modDest (mods[i]) != "distortion_drive")
                 continue;
 
-            const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
+            const auto n = std::to_string (i + 1);
+            const auto bipolar = settings.value ("modulation_" + n + "_bipolar", 0.0) >= 0.5;
+            const auto key = "modulation_" + n + "_amount";
             const auto amount = (float) settings.value (key, 0.0);
-            settings[key] = juce::jlimit (-0.35f, 0.35f, amount);
+
+            // Bipolar goes both ways at once, so it is held to whichever side
+            // has less room. Unipolar only goes the way its sign points.
+            const auto reach = bipolar ? kKnobDb * 0.5f : kKnobDb;
+            const auto room = bipolar ? juce::jmin (up, down) : (amount >= 0.0f ? up : down);
+            const auto ceiling = juce::jmin (0.35f, room / reach);
+
+            settings[key] = juce::jlimit (-ceiling, ceiling, amount);
 
             if (source.rfind ("lfo_", 0) == 0)
             {
