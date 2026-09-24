@@ -72,15 +72,21 @@ namespace axes
             dirt.key = "dirt";
             dirt.label = "DIRT";
             dirt.params = {
-                w ("^distortion_drive$", 1.0f),
                 w ("^distortion_mix$", 0.9f),
                 w ("^osc_\\d_distortion_amount$", 0.7f),
                 w ("^filter_\\d_drive$", 0.6f),
                 w ("^osc_\\d_unison_voices$", 0.4f),
             };
-            dirt.flip = { std::regex ("^distortion_type$"),
-                          std::regex ("^osc_\\d_distortion_type$") };
-            dirt.enables = { "distortion_on" };
+            // The distortion's own type is chosen from DIRT in shapeDistortion,
+            // in order of how hard each circuit hits, rather than flipped here.
+            dirt.flip = { std::regex ("^osc_\\d_distortion_type$") };
+            /*  The distortion's switch, drive and circuit are not drawn here.
+                DIRT sets all three directly, the switch before the wiring, the
+                drive as a band on the knob and the circuit in order of how hard
+                it hits, because for most circuits the knob's lower half is a
+                volume control and a skewed draw across it said nothing about
+                grit. See switchDistortion and shapeDistortion.
+            */
             dirt.macroDests = { "distortion_mix", "distortion_drive",
                                 "osc_1_distortion_amount" };
             list.push_back (std::move (dirt));

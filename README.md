@@ -37,7 +37,10 @@ Then rescan plugins in your DAW.
 ## Using it
 
 - **ROLL** makes a fresh patch from the style and the sliders.
-- **BRIGHT / MOVE / DIRT / SPACE** set the character. **COMPLEX** sets how much
+- **BRIGHT / MOVE / DIRT / SPACE** set the character. DIRT at zero switches the
+  distortion off. Further up it drives it harder and lets in harsher circuits:
+  the soft and hard clippers from the start, the folders from 0.4, and the bit
+  crusher and sample rate reducer from 0.7. **COMPLEX** sets how much
   of the synth a patch is allowed to use, from one oscillator through one filter
   to three oscillators, both filters and a wall of modulation. Each style starts
   where that style usually sits and individual rolls vary around it, so a batch
@@ -51,10 +54,9 @@ Then rescan plugins in your DAW.
   Vital's own GUI is kept too.
 - **SCALES** appears on the Sequence style and says which scales a riff may be
   built on. It starts on **Random scale**, which is the whole table of them.
-  **+** adds
-  another dropdown and **-** takes the last one away, so picking, say, blues and
-  dorian means every sequence walks one or the other and nothing else. One
-  Two entries in the list are not scales. **random steps** draws every step on
+  **+** adds another dropdown and **-** takes the last one away, so picking,
+  say, blues and dorian means every sequence walks one or the other and nothing
+  else. Two entries in the list are not scales. **random steps** draws every step on
   its own and snaps it to the nearest semitone, which leaps about the way a
   machine does rather than the way a player would, and **random quarter tones**
   does the same on the grid halfway between the semitones, so about half the

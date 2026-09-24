@@ -59,6 +59,20 @@ namespace gen
             return {};
         }
 
+        /** A stream for one named parameter, independent of every other draw.
+            FNV-1a rather than std::hash, so a recipe replays the same patch on
+            every platform and compiler. */
+        std::mt19937 streamFor (unsigned int base, const std::string& key, unsigned int salt)
+        {
+            std::uint32_t h = 2166136261u ^ salt;
+            for (const auto c : key)
+            {
+                h ^= (std::uint32_t) (unsigned char) c;
+                h *= 16777619u;
+            }
+            return std::mt19937 (base ^ h);
+        }
+
         bool modDestExists (const nlohmann::json& mods, const std::string& source,
                             const std::string& dest)
         {
@@ -504,6 +518,23 @@ namespace gen
         const auto keys = numericKeys (settings);
         std::set<std::string> touched;
 
+        /*  Every parameter draws from a stream of its own.
+
+            These used to share one stream, and how many numbers a step took
+            from it depended on the sliders: an axis sitting exactly at the
+            middle skipped its draws, a type flip made an extra draw only when
+            it fired, and the jitter below drew or did not depending on what
+            the axes had already set. So one seed at two DIRT settings came out
+            with a different reverb, different envelopes and a different
+            mix of levels, none of which DIRT has anything to do with.
+
+            Keyed by the parameter's name, a value no longer depends on how
+            many numbers anything else drew. The shared stream gives up exactly
+            one number to seed them, so whatever draws from it afterwards stays
+            aligned as well.
+        */
+        const auto base = (unsigned int) rng();
+
         for (const auto& axis : axes::all())
         {
             const auto slider = r.sliders.find (axis.key);
@@ -515,7 +546,8 @@ namespace gen
             {
                 if (r.locks.count (schema::sectionOf (member.first)) > 0)
                     continue;
-                const auto p = skew (uniform (rng), (value - 0.5f) * 2.0f * member.second);
+                auto own = streamFor (base, member.first, 0xA1u);
+                const auto p = skew (uniform (own), (value - 0.5f) * 2.0f * member.second);
                 float sampled = 0.0f;
                 if (sampleInRange (member.first, p, sampled))
                 {
@@ -534,7 +566,8 @@ namespace gen
                 if (! settings.contains (sw)
                     || r.locks.count (schema::sectionOf (sw)) > 0)
                     continue;
-                if (uniform (rng) < push)
+                auto own = streamFor (base, sw, 0xE2u);
+                if (uniform (own) < push)
                     settings[sw] = (value > 0.5f || ! axis.lowEndDisables) ? 1.0 : 0.0;
             }
 
@@ -545,9 +578,12 @@ namespace gen
             {
                 if (r.locks.count (schema::sectionOf (param)) > 0)
                     continue;
-                if (uniform (rng) < push * 0.5f)
+                auto own = streamFor (base, param, 0xF3u);
+                const auto roll = uniform (own);
+                const auto pick = std::floor (uniform (own) * 6.0f);
+                if (roll < push * 0.5f)
                 {
-                    settings[param] = std::floor (uniform (rng) * 6.0f);
+                    settings[param] = pick;
                     touched.insert (param);
                 }
             }
@@ -577,7 +613,8 @@ namespace gen
             const auto section = schema::sectionOf (key);
             if (section == schema::Section::excluded || r.locks.count (section) > 0)
                 continue;
-            if (uniform (rng) > r.amount * breadth)
+            auto own = streamFor (base, key, 0x17u);
+            if (uniform (own) > r.amount * breadth)
                 continue;
 
             float low = 0.0f, high = 0.0f;
@@ -595,10 +632,10 @@ namespace gen
                 setting the range allows and made half a batch sound alike.
             */
             const auto at = current < low || current > high
-                                ? uniform (rng)
+                                ? uniform (own)
                                 : juce::jlimit (0.0f, 1.0f,
                                                 (current - low) / juce::jmax (1.0e-6f, high - low)
-                                                    + gaussian (rng, spread));
+                                                    + gaussian (own, spread));
             const auto value = low + at * (high - low);
 
             // A stepped parameter has to land on a step. Vital reads 6.76 unison
@@ -726,7 +763,74 @@ namespace gen
         }
     }
 
-    void Generator::tameDriveModulation (nlohmann::json& settings)
+    DriveBand driveBandFor (float dirt)
+    {
+        /*  How hard the distortion is pushed, set by DIRT rather than drawn.
+
+            Vital's drive knob runs from -30 to +30 dB, and it is not the dial it
+            looks like. Swept fully wet against the effect switched off, the two
+            clippers and two folders follow the drive decibel for decibel up to
+            the middle of the knob, which means their shaper is linear there and
+            the lower half is a volume control. They start to saturate around
+            55% to 60% and are heavy past 70%. The bit crusher and sample rate
+            reducer are different again, and the circuit is chosen below in
+            shapeDistortion, but one band serves all six: the crushers only open
+            near the top of DIRT, where it already sits above unity.
+
+            So DIRT picks a band on the knob, in knob terms because that is what
+            anyone reading the patch sees, and every band starts at the middle
+            where the drive is at unity. At a tenth of the slider it rests
+            between 48% and 50% and may peak at 52%, which is clean. At the top
+            it rests between 50% and 60% and may peak at 70%. In between it is a
+            straight line through those two, and at zero the distortion is off.
+
+            The band used to start at the bottom of the knob, on a straight line
+            from 0%, and that was measured before it was dropped. Below the
+            middle a clipper is a gain stage and nothing else: a patch with the
+            drive at 29% came out 12.2 dB quieter with the effect on than off,
+            against 12.6 dB of negative drive, and a fully wet mix put the whole
+            signal through that cut. It added no grit a listener could pick out
+            from Vital's own take to take scatter anywhere below the top of the
+            slider, and at a DIRT of 0.5 a third of all rolls were thrown out
+            because the level correction could not make the loss back up with
+            the master volume at its maximum.
+
+            Starting at unity keeps the level where it is at every setting, and
+            the peaks carry the grit in: the ceiling crosses 55%, where the knob
+            begins to bite, a quarter of the way up the slider.
+        */
+        const auto t = (dirt - 0.1f) / 0.9f;
+        const auto line = [t] (float atTenth, float atTop)
+        { return juce::jlimit (0.0f, 1.0f, atTenth + (atTop - atTenth) * t); };
+
+        DriveBand band;
+        band.restLow  = line (0.48f, 0.50f);
+        band.restHigh = line (0.50f, 0.60f);
+        band.ceiling  = line (0.52f, 0.70f);
+        return band;
+    }
+
+    void Generator::switchDistortion (const Request& r, nlohmann::json& settings)
+    {
+        /*  On for any DIRT above nothing, off at nothing.
+
+            Decided here, before anything is wired, and from the slider alone.
+            The wiring passes over destinations whose module is off, so a switch
+            thrown after it would leave a macro pointing at a dead effect, and a
+            switch thrown by chance, as it used to be, made two rolls of one seed
+            at different DIRT settings wire themselves differently: two fifths of
+            their routing slots, where BRIGHT moved three hundredths.
+        */
+        if (r.base != nullptr || r.locks.count (schema::Section::fx) > 0
+            || ! settings.contains ("distortion_on"))
+            return;
+
+        const auto dirt = r.sliders.count ("dirt") > 0 ? r.sliders.at ("dirt") : 0.5f;
+        settings["distortion_on"] = dirt < 0.01f ? 0.0 : 1.0;
+    }
+
+    void Generator::shapeDistortion (const Request& r, nlohmann::json& settings,
+                                     unsigned int seed)
     {
         /*  Drive is not a destination to swing hard or quickly.
 
@@ -737,28 +841,74 @@ namespace gen
             breathing rather than stuttering.
 
             The depth used to be a flat 0.35, which sounds conservative and is
-            not. Vital's drive knob runs from -30 to +30 dB, so it is 60 dB from
-            end to end, and a depth is a fraction of that: 0.35 unipolar is 21 dB
-            of swing, better than a third of the knob, and 0.35 bipolar is 10.5
-            either way. Measured across a batch, the resting band was ten points
-            of knob wide and the modulation aimed at it was moving seventeen to
-            thirty five, so two patches drove the knob to its top and one to its
-            bottom, and what the resting place was set to hardly mattered.
+            not. A depth is a fraction of the whole 60 dB knob: 0.35 unipolar is
+            21 dB of swing and 0.35 bipolar is 10.5 either way, and across a
+            batch that was taking a ten point resting band to both ends of the
+            knob. What made the distortion hot was the swing, not where it
+            rested.
 
-            So the cap is worked backwards from where the knob is allowed to
-            reach instead of being a number that looked small. The drive rests
-            in the bottom third and nothing may take it past 40%, which is -6 dB,
-            so each modulation gets a share of whatever headroom is left between
-            where this patch rests and that ceiling. Unipolar spans the whole 60
-            dB and bipolar half of it either side, verified against static
-            renders rather than assumed, so the two convert differently.
+            So the cap is worked backwards from where the knob may reach. Each
+            modulation gets a share of the room between where this patch rests
+            and the ceiling DIRT allows, and of the room down to 0%, since depth
+            past the bottom is the knob stopped rather than the grit getting
+            quieter. Unipolar spans the whole 60 dB and bipolar half of it either
+            side, verified against static renders rather than assumed.
         */
+        constexpr float kKnobDb = 60.0f;     // -30 to +30, confirmed by where it clamps
+        const auto toDb = [] (float knob) { return knob * 60.0f - 30.0f; };
+
+        const auto dirt = r.sliders.count ("dirt") > 0 ? r.sliders.at ("dirt") : 0.5f;
+        const auto band = driveBandFor (dirt);
+        const auto locked = r.locks.count (schema::Section::fx) > 0;
+
+        /*  A fresh patch has its resting drive and its circuit set from DIRT.
+
+            The switch was already thrown in switchDistortion, before the wiring.
+            VARY keeps the patch it was given, so it only gets the swing cap, and
+            a locked effects section is left exactly as it is. Both draws have a
+            stream of their own, so where the drive lands and which circuit is
+            picked never move any other value in the patch.
+        */
+        if (r.base == nullptr && ! locked && settings.contains ("distortion_drive")
+            && settings.value ("distortion_on", 0.0) >= 0.5)
+        {
+            std::mt19937 drng (seed ^ 0xD1A70000u);
+            std::uniform_real_distribution<float> within (band.restLow, band.restHigh);
+            settings["distortion_drive"] = toDb (within (drng));
+
+            /*  And the circuit, which matters more than the drive.
+
+                Vital's six are two families. The two clippers and two folders
+                do nothing below the middle of the knob but change the level,
+                and only bite from about 55%. The last two, which behave like a
+                bit crusher and a sample rate reducer, leave the level alone at
+                any drive and change the tone heavily from 30% of the knob up:
+                one at 30% moves the spectrum further than a soft clipper does
+                at 80%. The type used to be re-rolled at random at either end of
+                the slider, so a DIRT of 0.1 could land on a crusher while 0.5
+                never changed type at all, and nearly all the grit a batch had
+                came from the few patches that happened to get one.
+
+                So DIRT opens them in order of how hard they hit. The clippers
+                from the bottom, the folders from 0.4, the crushers from 0.7,
+                and each patch draws evenly from whatever is open.
+            */
+            if (settings.contains ("distortion_type"))
+            {
+                std::vector<int> open = { 0, 1 };
+                if (dirt >= 0.4f) { open.push_back (2); open.push_back (3); }
+                if (dirt >= 0.7f) { open.push_back (4); open.push_back (5); }
+
+                std::mt19937 trng (seed ^ 0xD1A7F00Du);
+                const auto drawn = open[(size_t) std::uniform_int_distribution<int> (
+                    0, (int) open.size() - 1) (trng)];
+                settings["distortion_type"] = (double) (r.distortionType >= 0 && r.distortionType < 6
+                                                            ? r.distortionType : drawn);
+            }
+        }
+
         if (! settings.contains ("modulations") || ! settings["modulations"].is_array())
             return;
-
-        constexpr float kKnobDb = 60.0f;     // -30 to +30, confirmed by where it clamps
-        constexpr float kCeilingDb = -6.0f;  // 40% of the knob
-        constexpr float kFloorDb = -30.0f;   // 0%, where it stops going down
 
         auto& mods = settings["modulations"];
 
@@ -770,17 +920,9 @@ namespace gen
         if (aimed == 0)
             return;
 
-        /*  Bounded at both ends, not just the top.
-
-            A patch resting near the bottom of the knob with a bipolar
-            modulation deep enough to reach 40% also reaches well below 0%, and
-            below 0% is not quieter, it is the same silence over and over
-            because the knob has stopped. That is depth spent on nothing, and it
-            reads as the grit cutting out rather than moving.
-        */
         const auto resting = (float) settings.value ("distortion_drive", 0.0);
-        const auto up = juce::jmax (0.0f, kCeilingDb - resting) / (float) aimed;
-        const auto down = juce::jmax (0.0f, resting - kFloorDb) / (float) aimed;
+        const auto up = juce::jmax (0.0f, toDb (band.ceiling) - resting) / (float) aimed;
+        const auto down = juce::jmax (0.0f, resting - toDb (0.0f)) / (float) aimed;
 
         for (size_t i = 0; i < mods.size(); ++i)
         {
@@ -1565,6 +1707,18 @@ namespace gen
         std::mt19937 srng (seed);
         std::mt19937 prng (seed ^ 0x9E3779B9u);
 
+        /*  And the synthesised content from streams of its own.
+
+            The sample and the wavetables are built from BRIGHT and DIRT, and
+            how many numbers they draw depends on both. They used to draw from
+            the structure stream, so moving either slider moved every draw after
+            them, the wiring included: two rolls of one seed at a low and a high
+            DIRT differed in more than a third of their routing slots, which is
+            exactly what the two streams above were meant to prevent.
+        */
+        std::mt19937 samplerng (seed ^ 0x5A3B1E00u);
+        std::mt19937 contentrng (seed ^ 0xC0A7E700u);
+
         /*  One batch at one slider setting should still hold a sparse patch and
             a busy one. A real library varies because different people made the
             presets in it, so each roll wobbles around the setting instead of
@@ -1601,17 +1755,18 @@ namespace gen
             ensureModSlots (settings);
             applyArchetype (*style, r, settings);
             applyComplexity (r, settings, srng);
-            synthesiseSample (r, settings, srng);
+            synthesiseSample (r, settings, samplerng);
         }
 
-        synthesiseContent (r, settings, srng);
+        synthesiseContent (r, settings, contentrng);
         applyAxes (r, settings, prng);
+        switchDistortion (r, settings);
         if (r.base == nullptr)
             wireRouting (*style, r, settings, srng);
         wireMacros (r, result.preset, settings, result);
         scaleModulationDepth (r, settings);
         keepStruckNotesStruck (r, settings);
-        tameDriveModulation (settings);
+        shapeDistortion (r, settings, seed);
         applyNoteShape (r, settings, prng);
         constrainPitch (r, settings, srng, result.scale);
         result.repairs = repair (settings);

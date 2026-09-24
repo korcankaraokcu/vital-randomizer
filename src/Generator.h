@@ -50,6 +50,9 @@ namespace gen
         /*  Which shape the line takes. Negative picks one. Naming it is for
             hearing one gesture against another with everything else held. */
         int gesture = -1;
+        /*  Which distortion circuit. Negative lets DIRT choose, which is what a
+            roll wants; naming one is for hearing the six against each other. */
+        int distortionType = -1;
         std::string name;
     };
 
@@ -105,7 +108,11 @@ namespace gen
         void carrySequenceToEveryVoice (nlohmann::json& settings,
                                         const std::string& driver, float depth);
         void scaleModulationDepth (const Request& r, nlohmann::json& settings);
-        void tameDriveModulation (nlohmann::json& settings);
+        /** Switch the distortion on or off from DIRT, before the wiring. */
+        void switchDistortion (const Request& r, nlohmann::json& settings);
+        /** Set the distortion from DIRT and hold whatever moves the drive
+            inside the band DIRT allows. */
+        void shapeDistortion (const Request& r, nlohmann::json& settings, unsigned int seed);
         void keepStruckNotesStruck (const Request& r, nlohmann::json& settings);
         std::vector<std::string> repair (nlohmann::json& settings);
 
@@ -128,6 +135,12 @@ namespace gen
         */
         float randomStep = 0.0f;
     };
+
+    /** Where the distortion drive may sit, as fractions of Vital's knob. */
+    struct DriveBand { float restLow = 0.0f, restHigh = 0.0f, ceiling = 0.0f; };
+
+    /** The drive band a DIRT setting asks for. */
+    DriveBand driveBandFor (float dirt);
 
     /** Every scale a sequence may be built on. */
     const std::vector<Scale>& sequenceScales();

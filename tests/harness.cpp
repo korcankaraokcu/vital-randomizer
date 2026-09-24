@@ -175,6 +175,10 @@ int main (int argc, char** argv)
     juce::File modelsTo;
     juce::File scalesTo;
     juce::File gesturesTo;
+    // With --axis, write the low and high patches instead of scoring them.
+    juce::File pairsTo;
+    juce::File dirtLadderTo;
+    juce::File typesTo;
     // Which scale the gesture demo walks. The shapes read differently on a
     // seven note maqam than on a pentatonic, and the note floor bites hardest
     // on the big scales, so it has to be possible to ask for one.
@@ -185,6 +189,9 @@ int main (int argc, char** argv)
         the same has never been measured, and this is what measures it.
     */
     int renders = 3;
+    // The axis test used to score one render per side. Only when asked does
+    // it average, so numbers from before stay comparable.
+    bool rendersGiven = false;
     for (int i = 1; i < argc; ++i)
     {
         const juce::String arg (argv[i]);
@@ -208,8 +215,15 @@ int main (int argc, char** argv)
         if (arg.startsWith ("--models="))    modelsTo = juce::File (value);
         if (arg.startsWith ("--scales="))    scalesTo = juce::File (value);
         if (arg.startsWith ("--gestures=")) gesturesTo = juce::File (value);
+        if (arg.startsWith ("--pairs="))    pairsTo = juce::File (value);
+        if (arg.startsWith ("--dirt-ladder=")) dirtLadderTo = juce::File (value);
+        if (arg.startsWith ("--distortion-types=")) typesTo = juce::File (value);
         if (arg.startsWith ("--gesture-scale=")) gestureScale = value;
-        if (arg.startsWith ("--renders="))   renders = juce::jlimit (1, 8, value.getIntValue());
+        if (arg.startsWith ("--renders="))
+        {
+            renders = juce::jlimit (1, 8, value.getIntValue());
+            rendersGiven = true;
+        }
         if (arg.startsWith ("--stats="))     statsRolls = value.getIntValue();
         if (arg.startsWith ("--rejects="))   rejectsTo = juce::File (value);
         if (arg.startsWith ("--axis="))      axisKey = value.trim();
@@ -319,6 +333,128 @@ int main (int argc, char** argv)
         rolled again into a different patch, and then the two sides are no longer
         the same patch with one slider moved.
     */
+    /*  One patch in each of Vital's six distortion circuits, for listening.
+
+        DIRT 0.75, where all six are open, one seed per style, and everything
+        but the type held still, so the files differ in the circuit alone. The
+        names are the order Vital's menu lists them in; the menu itself is the
+        authority if they ever disagree.
+    */
+    if (typesTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+        typesTo.createDirectory();
+
+        const char* names[] = { "soft_clip", "hard_clip", "linear_fold",
+                                "sine_fold", "bit_crush", "down_sample" };
+        for (const auto& styleName : styles)
+        {
+            const auto defaults = archetype::defaultSlidersFor (styleName.toStdString());
+            for (int type = 0; type < 6; ++type)
+            {
+                gen::Request request;
+                request.style = styleName.toStdString();
+                request.seed = 0x7E5E0001u;
+                request.amount = 1.0f;
+                request.complexityWobble = 0.0f;
+                request.distortionType = type;
+                request.sliders = {
+                    { "bright", defaults.bright }, { "dirt", 0.75f },
+                    { "space", defaults.space },   { "move", defaults.move },
+                    { "complexity", defaults.complexity } };
+
+                auto result = generator.roll (request);
+                if (! result.ok || ! host.applyPreset (result.preset))
+                    continue;
+                audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+                loudness::normalise (result.preset["settings"], m.rms, m.peak);
+
+                auto out = result.preset;
+                out.erase ("tuning");
+                out["preset_name"] = (styleName + " type " + juce::String (type) + " "
+                                      + juce::String (names[type]).replace ("_", " ")).toStdString();
+                out["preset_style"] = styleName.toStdString();
+                out["comments"] = "one patch in each distortion type, DIRT 0.75, level matched";
+                typesTo.getChildFile (styleName + "_type" + juce::String (type) + "_"
+                                      + names[type] + ".vital")
+                       .replaceWithText (juce::String (out.dump()));
+            }
+            std::cout << "  " << styleName << std::endl;
+        }
+        std::cout << "written to " << typesTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
+    /*  The same patches at five DIRT settings, for listening.
+
+        Two seeds per style, each built at DIRT 0, 0.25, 0.5, 0.75 and 1, with
+        every other slider at the style's default. The content and the wiring
+        have streams of their own, so within one seed the only thing that moves
+        between files is what DIRT sets, and each file is level matched like a
+        roll would be, so louder never passes for dirtier.
+    */
+    if (dirtLadderTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+        dirtLadderTo.createDirectory();
+
+        for (const auto& styleName : styles)
+        {
+            const auto defaults = archetype::defaultSlidersFor (styleName.toStdString());
+            for (int s = 0; s < 2; ++s)
+            {
+                const auto seed = (unsigned int) (0xD1B70000u + (unsigned int) s * 2654435761u) | 1u;
+                for (const auto dirt : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f })
+                {
+                    gen::Request request;
+                    request.style = styleName.toStdString();
+                    request.seed = seed;
+                    request.amount = 1.0f;
+                    request.complexityWobble = 0.0f;
+                    request.sliders = {
+                        { "bright", defaults.bright }, { "dirt", dirt },
+                        { "space", defaults.space },   { "move", defaults.move },
+                        { "complexity", defaults.complexity } };
+
+                    auto result = generator.roll (request);
+                    if (! result.ok || ! host.applyPreset (result.preset))
+                        continue;
+                    audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                    const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+                    loudness::normalise (result.preset["settings"], m.rms, m.peak);
+
+                    const auto label = juce::String (juce::roundToInt (dirt * 100.0f)).paddedLeft ('0', 3);
+                    auto out = result.preset;
+                    out.erase ("tuning");
+                    out["preset_name"] = (styleName + " " + juce::String (s + 1) + " dirt " + label).toStdString();
+                    out["preset_style"] = styleName.toStdString();
+                    out["comments"] = "one seed at five DIRT settings, level matched";
+                    dirtLadderTo.getChildFile (styleName + "_" + juce::String (s + 1)
+                                               + "_dirt" + label + ".vital")
+                                .replaceWithText (juce::String (out.dump()));
+                }
+            }
+            std::cout << "  " << styleName << std::endl;
+        }
+        std::cout << "\nwritten to " << dirtLadderTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
     /*  One sequence per gesture, on one scale, so the shape of the line is the
         only thing that differs.
 
@@ -622,6 +758,9 @@ int main (int argc, char** argv)
 
     if (axisKey.isNotEmpty())
     {
+        if (pairsTo != juce::File())
+            pairsTo.createDirectory();
+
         /*  Each axis needs the number that says whether it did its job, and
             they are not the same number.
 
@@ -695,13 +834,35 @@ int main (int argc, char** argv)
                     request.sliders[axisKey.toStdString()] = side == 0 ? 0.15f : 0.85f;
 
                     auto rolled = generator.roll (request);
+
+                    /*  Or just write the pair and move on.
+
+                        A new metric is quicker to try against saved patches
+                        than to build into this loop and rerun eight minutes at
+                        a time, so this writes the exact low and high patches
+                        the test would have scored and leaves the scoring to
+                        whatever is being tried.
+                    */
+                    if (pairsTo != juce::File() && rolled.ok)
+                    {
+                        auto out = rolled.preset;
+                        out.erase ("tuning");
+                        pairsTo.getChildFile (styleName + "_" + juce::String (t).paddedLeft ('0', 2)
+                                              + (side == 0 ? "_lo" : "_hi") + ".vital")
+                               .replaceWithText (juce::String (out.dump()));
+                        continue;
+                    }
+
                     if (! rolled.ok || ! host.applyPreset (rolled.preset))
                     {
                         ok = false;
                         break;
                     }
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
-                    const auto m = audition::audition (*host.processor(), kSampleRate, kBlockSize);
+                    const auto m = rendersGiven
+                        ? audition::auditionAveraged (*host.processor(), kSampleRate,
+                                                      kBlockSize, renders)
+                        : audition::audition (*host.processor(), kSampleRate, kBlockSize);
                     if (! m.usable())
                         ok = false;
                     else
@@ -826,6 +987,31 @@ int main (int argc, char** argv)
         was supposed to be.
     */
                 bool exhausted = true;
+                // What each pass asked the level correction for, kept so a
+                // rejected patch can say why it never landed.
+                std::vector<float> asked;
+                auto writeLevelReject = [&] (const juce::String& why)
+                {
+                    if (rejectsTo == juce::File())
+                        return;
+                    rejectsTo.createDirectory();
+                    const auto& st = result.preset["settings"];
+                    const auto knob = [] (double db) { return juce::roundToInt ((db + 30.0) / 60.0 * 100.0); };
+                    juce::String trail;
+                    for (const auto a : asked)
+                        trail << (a >= 0.0f ? "+" : "") << juce::String (a, 1) << "dB ";
+                    auto out = result.preset;
+                    out["comments"] = (why + ". Corrections asked for, pass by pass: " + trail.trim()
+                                       + ". Distortion " + (st.value ("distortion_on", 0.0) >= 0.5 ? "on" : "off")
+                                       + ", drive at " + juce::String (knob (st.value ("distortion_drive", 0.0))) + "% of the knob"
+                                       + ", mix " + juce::String (juce::roundToInt (100.0 * st.value ("distortion_mix", 0.0))) + "%.")
+                                          .toStdString();
+                    rejectsTo.getChildFile (style + "_" + why.replace (" ", "")
+                                            + "_drive" + juce::String (knob (st.value ("distortion_drive", 0.0)))
+                                            + "_mix" + juce::String (juce::roundToInt (100.0 * st.value ("distortion_mix", 0.0)))
+                                            + "_" + juce::String (result.seed) + ".vital")
+                              .replaceWithText (juce::String (out.dump (2)));
+                };
                 for (int pass = 0; pass < 3; ++pass)
                 {
                     const auto loaded = pass == 0
@@ -955,6 +1141,7 @@ int main (int argc, char** argv)
                     }
 
                     auto wanted = loudness::correctionDb (m.rms, m.peak);
+                    asked.push_back (wanted);
 
                     // The reading is already three renders averaged, so there is
                     // nothing left to confirm it against.
@@ -972,6 +1159,7 @@ int main (int argc, char** argv)
                     {
                         exhausted = false;
                         rejects[style]["level out of reach"]++;
+                        writeLevelReject ("level out of reach");
                         break;
                     }
                 }
@@ -980,7 +1168,10 @@ int main (int argc, char** argv)
                 // its own outcome, and it was invisible: a style could fail to
                 // fill its quota with nothing at all recorded against it.
                 if (! accepted && exhausted)
+                {
                     rejects[style]["level never settled"]++;
+                    writeLevelReject ("level never settled");
+                }
 
                 if (! accepted)
                 {

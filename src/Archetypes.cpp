@@ -363,39 +363,37 @@ namespace archetype
             { R"(^portamento_time$)",                   -10.0f,  -3.0f },
 
             // effects
-            /*  Vital's drive knob runs from -30 to +30 dB, so eleven sat at
-                about 68% of the way up it. A lead at 10.8 dB with the mix near
-                two thirds was still tearing after the modulation was tamed, so
-                the ceiling came down to 60% of the knob, which is +6, and then
-                to 40%, which is -6, because it was still hot by ear.
+            /*  Vital's drive knob runs from -30 to +30 dB, and it means
+                different things to different circuits. For the two clippers and
+                two folders the lower half is a volume control, since their
+                shaper is linear up to the middle and only saturates from about
+                55%. The bit crusher and sample rate reducer never change the
+                level and bite hard from 30% up.
 
-                Judged by ear rather than by the number, because the number does
-                not see it. Rendered against the same patch with the effect
-                switched off, the distortion at +3 with the mix at 0.42 alters
-                the signal by more than the dry signal's own level, while the
-                crest factor the DIRT axis is scored on moves 0.75 dB across the
-                entire mix range and the share of energy above 2 kHz moves 3%.
-                Both of those say it is doing nothing. It is not.
-
-                The knob rests in its bottom third, 0% to 30%, which is -30 to
-                -12 dB, and nothing may take it past 40%. Where it rests was
-                never the problem: the band was ten points wide and the LFOs and
-                envelopes aimed at it were swinging seventeen to thirty five, so
-                two patches in the batch reached the top of the knob and one
-                reached the bottom. The ceiling is enforced against the swing
-                rather than against the resting place, in tameDriveModulation.
+                A fresh patch's drive is not drawn from this range. DIRT sets it
+                in shapeDistortion, resting between 48% and 60% and peaking at
+                70% at most, and picks the circuit as well. This is only the
+                envelope repair holds every patch to, 0% to 60%, left wider than
+                any band so that VARY does not drag a patch's drive into one.
             */
-            { R"(^distortion_drive$)",                  -30.0f, -12.0f },
+            { R"(^distortion_drive$)",                  -30.0f,   6.0f },
             /*  The mix is left alone, the whole knob.
 
                 It used to be held to the middle third, on the grounds that a
                 fully wet distortion leaves nothing of the note underneath it.
-                That was true when the drive sat in the top half of its knob,
-                where the shaping is violent enough that hearing only the shaped
-                signal is a different instrument. With the drive now resting in
-                the bottom third and capped at 40% however it is driven, wet is
-                a tone rather than a wreck, and the mix is the one control that
-                should be free to say how much of it you want.
+                That was true when the drive could be swung to the top of its
+                knob, where the shaping is violent enough that hearing only the
+                shaped signal is a different instrument. The drive now rests
+                around unity and cannot pass 70%, so wet is a tone rather than a
+                wreck, and the mix is the one control that should be free to say
+                how much of it you want.
+
+                Styles whose designs do not use distortion inherit Vital's own
+                default here, which is fully wet. That only cost level while the
+                drive could rest below unity: a patch at 29% of the knob came out
+                12 dB quieter with the effect on, and a third of all rolls at a
+                DIRT of 0.5 were thrown out for it. Resting at unity, fully wet
+                costs nothing.
             */
             { R"(^distortion_mix$)",                      0.0f,   1.0f },
             { R"(^reverb_dry_wet$)",                      0.0f,   0.6f },

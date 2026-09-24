@@ -259,22 +259,11 @@ add more on top, instead of starting from zero.
 Everything at the middle is the least characterful thing the generator can
 produce, because nothing is being asked of it.
 
-**Axes**, tested by building the same patch from the same seed twice, once with
-the slider low and once high, so everything but the slider cancels out:
-
-| axis | agreement | |
-|---|---|---|
-| dirt | 90% | works |
-| space | 80% | works |
-| move | 80% | works |
-| bright | 70% | weakest, see below |
-
-`bright` is the hard one. Filter cutoff is both the obvious brightness control
-and the most modulated destination in a real library, so biasing it statically
-gets overridden by whatever envelope is already driving it. Adding the EQ as a
-lever tripled the effect size, from a 76 Hz to a 219 Hz median move, but
-consistency stayed at 70%. Biasing the modulation depths that target cutoff is
-the next thing to try.
+**Axes**, tested by building the same patch from one seed twice, once with the
+slider low and once high, each scored on the number that axis is meant to move.
+BRIGHT 99%, SPACE 94%, MOVE 73%, DIRT 61%, over about 315 pairs each. DIRT's
+figure is on a metric that is known not to fit it; see "What a slider is worth"
+and the roadmap.
 
 **Timing**, on a real instance:
 
@@ -588,7 +577,15 @@ away between 19 and 61 candidates, which is a wider spread than most changes
 worth testing, and it was very nearly used as evidence twice.
 
 `vrtest --renders=N` sets how many renders each measurement averages, which is
-three in the screen and is what decided that three is where it stays.
+three in the screen and is what decided that three is where it stays. Given to
+`--axis`, it averages there too; without it the axis test keeps its single
+render, so older figures stay comparable.
+
+`vrtest --axis=<key> --pairs=<dir>` writes the low and high patch of every pair
+instead of scoring them, so a new metric can be tried against saved patches
+without rerunning the test. `--rejects=<dir>` now writes level failures as well,
+with the corrections asked for on each pass and the distortion settings in the
+comments field.
 
 `vrtest --stats=N` rolls the same number every time, screens each once with no
 retry, and writes nothing. Two runs of it gave 55% and 58%, and the per style
@@ -639,10 +636,24 @@ existed, only ever measured brightness.
 
 | axis | scored on | agreement |
 |---|---|---|
-| BRIGHT | energy centroid | 97% |
-| SPACE | tail against the note | 93% |
-| MOVE | how far the centroid wanders | 77% |
-| DIRT | crest, which falls as drive rises | 72% |
+| BRIGHT | energy centroid | 99% |
+| SPACE | tail against the note | 94% |
+| MOVE | how far the centroid wanders | 73% |
+| DIRT | crest, which falls as drive rises | 61% |
+
+"One seed means only the axis differs" was not true until recently, and it
+mattered most for DIRT. The wavetables and the sample are built from BRIGHT and
+DIRT and used to draw from the same stream as the wiring, and every parameter
+shared one value stream whose draw count depended on the sliders. So two rolls of
+one seed at a low and a high DIRT differed in two fifths of their routing slots,
+and a seed walked across five DIRT settings changed its reverb, its envelopes and
+its levels as well. The content now has streams of its own and each parameter is
+keyed by its name, and within one seed DIRT and BRIGHT now change nothing else.
+SPACE still re-points a few macros at the reverb and delay, and MOVE rewires,
+because that is what those two axes are for.
+
+DIRT's number is the weak one for a reason covered below: crest assumes the
+distortion squashes peaks, and at the drive DIRT now uses, most of it does not.
 
 It caught BRIGHT arguing with itself. An axis switches its effects on when pushed
 and off at the other end, which is right where the effect adds the quality the
@@ -699,6 +710,69 @@ python measure.py level      ../out
 python measure.py pitch      ../out
 python measure.py held       ../out/Bass_01.vital
 ```
+
+## What DIRT does to the distortion
+
+Vital's distortion drive runs from -30 to +30 dB, confirmed by where it clamps,
+and it is not the dial it looks like. Each circuit was swept fully wet against
+the effect switched off, level matched, on eight patches with the render made
+deterministic:
+
+| circuit | change in tone, 30% / 50% / 60% / 70% / 80% of the knob | level at 50% |
+|---|---|---|
+| soft clip | 0.1 / 0.3 / 0.9 / 2.3 / 4.2 dB | -0.4 dB |
+| hard clip | 0.1 / 0.0 / 0.8 / 3.2 / 4.8 dB | 0 dB |
+| linear fold | 0.1 / 0.0 / 1.4 / 5.2 / 8.5 dB | 0 dB |
+| sine fold | 0.1 / 0.4 / 1.7 / 4.9 / 8.1 dB | +3.4 dB |
+| bit crush | 6.4 / 8.9 / 9.4 / 9.4 / 10.1 dB | +0.8 dB |
+| down sample | 4.4 / 6.1 / 5.5 / 6.4 / 10.3 dB | 0 dB |
+
+The circuit names follow the order of Vital's menu, which is the authority if
+they disagree. The clippers and folders follow the drive decibel for decibel
+below the middle, so there they are a volume control and nothing else, and they
+bite from about 55%. The crushers never change the level and are strong from 30%.
+
+So DIRT sets three things directly, not by a skewed draw:
+
+- **The switch.** Off at zero, on above it, thrown before the wiring so a macro
+  is never left pointing at a switched off effect.
+- **The drive**, as a band on the knob that starts at unity. At a DIRT of 0.1 it
+  rests between 48% and 50% and may peak at 52%; at the top it rests between 50%
+  and 60% and may peak at 70%; it is a straight line in between.
+- **The circuit**, in order of how hard it hits. The clippers are open from the
+  bottom, the folders from 0.4 and the crushers from 0.7, and each patch draws
+  evenly from whatever is open.
+
+The band used to start at the bottom of the knob. Below the middle a clipper only
+turns the patch down: one Keys patch with the drive at 29% came out 12.2 dB
+quieter with the effect on, against 12.6 dB of negative drive, and styles whose
+designs do not use distortion inherit Vital's default mix of 100%, so the whole
+signal went through that cut. It added no grit anyone could hear, and at a DIRT
+of 0.5 a third of all rolls were thrown out because the level correction could
+not win the loss back with the master volume at its maximum. Starting at unity,
+every DIRT setting screens at 86% to 92%.
+
+Whatever moves the drive, an LFO, an envelope, a random source or a macro, is
+held inside the band. Each gets a share of the room between where the patch
+rests and the ceiling, and of the room down to 0%. A depth is a fraction of the
+whole knob, so unipolar reaches depth times 60 dB and bipolar depth times 30 dB
+either way, which was checked against static renders. The old flat cap of 0.35
+was 21 dB of swing, and that swing, not the resting place, was what had made
+the distortion hot.
+
+One consequence is left in on purpose. Bipolar modulation dips as far as it
+lifts, so a clipper or folder resting at 55% can dip into the lower half, where
+it ducks the level for a moment rather than cleaning up. It happens to about one
+clip or fold patch in thirteen, down to about -8 dB at worst.
+
+The mix is left free across the whole knob. With the drive resting at unity a
+fully wet distortion is a tone rather than a level loss.
+
+Two demos exist for listening rather than reading. `vrtest --dirt-ladder=<dir>`
+builds two seeds per style at DIRT 0, 0.25, 0.5, 0.75 and 1, level matched, and
+within a seed only what DIRT sets differs. `vrtest --distortion-types=<dir>`
+builds one patch per style in each of the six circuits at DIRT 0.75, differing
+in the circuit alone.
 
 ## Three renders, and why it is not two
 

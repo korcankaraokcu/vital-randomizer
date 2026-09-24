@@ -4,23 +4,39 @@ Open work, roughly in the order I would do it. Anything measured is measured, so
 the numbers here come from `vrtest` and from rendering through Vital rather than
 from impressions.
 
-## 1. DIRT is the weakest axis and neither metric measures it well
+## 1. DIRT has no metric that fits it, and two of its levers do nothing
 
-Agreement by axis: BRIGHT 97%, SPACE 93%, MOVE 77%, DIRT 72% over 316 pairs.
+The distortion itself is settled and written up in the notes under "What DIRT
+does to the distortion": DIRT switches it, sets the drive as a band that starts
+at unity, and opens the circuits in order of how hard they hit. What is left is
+the rest of the axis and the number it is judged by.
 
-DIRT is scored on crest, on the reasoning that distortion fills in the gap
-between peak and average. The level matching also changes peak against average,
-so that number was suspect, and spectral flatness was tried instead as something
-the loudness correction cannot touch. It scored 59%, worse, with percussion
-inverted at 20%. Crest stays.
+Agreement by axis, `vrtest --axis=<key> --trials=40`, about 315 pairs each:
 
-Where it fails is not spread evenly:
+| BRIGHT | SPACE | MOVE | DIRT |
+|---|---|---|---|
+| 99% | 94% | 73% | 61% |
 
-| Percussion | Bass | Lead | Experiment | SFX | Keys | Pad | Sequence |
-|---|---|---|---|---|---|---|---|
-| 97% | 87% | 80% | 66% | 65% | 62% | 61% | 60% |
+**The metric.** DIRT is scored on crest, which assumes distortion squashes
+peaks. The clippers resting around unity barely do, and the crushers change the
+tone without doing much to the peak, so crest is the wrong question for most of
+what DIRT now produces. Ten candidates were tried against saved pairs and none
+separated DIRT: the best, spectral flatness, also scored 97% on BRIGHT and 85% on
+SPACE. That was measured while DIRT's distortion was still inaudible, though,
+so it deserves another go now that it makes grit. `--pairs=<dir>` writes the
+pairs for exactly this, and any candidate has to be shown to stay put when
+BRIGHT and SPACE move, or it measures them instead.
 
-It works on the styles whose crest is low to begin with and fails on the ones
-already dense, which hints the metric reads the signal rather than the drive.
-What would settle it is a measure built from what DIRT actually does, the energy
-distortion adds between the harmonics.
+**The levers.** Isolated one family at a time, against two takes of the same
+patch as the unit, DIRT's other parameters came out as:
+
+| family | audible change | direction |
+|---|---|---|
+| filter drive | 1.0x | none, inaudible where it sits |
+| oscillator warp | 1.5x | random, it is sync and formant and bend, not grit |
+| unison voices | 1.3x | denser, which is thickness rather than dirt |
+
+Whether filter drive stays, or gets a range where it does something, and whether
+oscillator warp belongs to DIRT at all, are open. Anything taken out falls back
+to the general jitter, which no other axis claims, and all four axes need
+re-running afterwards.
