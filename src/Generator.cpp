@@ -133,6 +133,7 @@ namespace gen
                 { std::regex ("_wave_frame$"), "WAVE" },
                 { std::regex ("distortion_amount"), "WARP" },
                 { std::regex ("^distortion_"), "DRIVE" },
+                { std::regex ("^filter_\\d_drive$"), "GRIT" },
                 { std::regex ("^reverb_"), "REVERB" },
                 { std::regex ("^delay_"), "DELAY" },
                 { std::regex ("^chorus_"), "CHORUS" },
@@ -184,6 +185,17 @@ namespace gen
                 { "osc_2", "osc_2_on" }, { "osc_3", "osc_3_on" },
                 { "sample", "sample_on" },
             };
+            /*  An oscillator's warp amount is a dead knob while its warp type
+                is the first one, which does nothing, and most patches sit
+                there. A macro wired to it used to be exactly that.
+            */
+            const std::string warp = "_distortion_amount";
+            if (dest.size() > warp.size()
+                && dest.compare (dest.size() - warp.size(), warp.size(), warp) == 0
+                && dest.rfind ("osc_", 0) == 0
+                && settings.value (dest.substr (0, dest.size() - warp.size()) + "_distortion_type", 0.0) < 0.5)
+                return false;
+
             for (const auto& p : pairs)
                 if (dest.rfind (p.first, 0) == 0)
                     return settings.value (p.second, 1.0) >= 0.5;
@@ -829,6 +841,56 @@ namespace gen
         settings["distortion_on"] = dirt < 0.01f ? 0.0 : 1.0;
     }
 
+    void Generator::chooseWarp (const Request& r, nlohmann::json& settings, unsigned int seed)
+    {
+        /*  Oscillator warp, chosen by how much of the synth a patch may use.
+
+            Vital files it under distortion, but its types are sync, formant,
+            bend, squeeze and the like, and they reshape the tone in every
+            direction: measured at the same depth, most lift the centroid and
+            only one reliably fills the spectrum in. That is character, not
+            grit, so it left DIRT. And its first type does nothing at all,
+            which is where 42 patches in 48 were sitting, so a DIRT lever on
+            the warp amount was a knob connected to nothing most of the time.
+
+            A patch that is allowed more of the synth is likelier to warp an
+            oscillator: one chance in twenty at the bottom of COMPLEX and one
+            in four at the top, per oscillator that is on. The types are the
+            six that work on an oscillator by itself; the ones that borrow from
+            another oscillator are left for a patch that sets them on purpose.
+            Chosen before the wiring, so a macro only lands on a warp that is
+            actually doing something.
+        */
+        if (r.base != nullptr || r.locks.count (schema::Section::osc) > 0)
+            return;
+
+        const auto complexity = r.sliders.count ("complexity") > 0
+                                    ? r.sliders.at ("complexity") : 0.5f;
+        const auto chance = 0.05f + 0.20f * complexity;
+
+        for (int n = 1; n <= 3; ++n)
+        {
+            const auto osc = "osc_" + std::to_string (n);
+            if (settings.value (osc + "_on", 0.0) < 0.5 || ! settings.contains (osc + "_distortion_type"))
+                continue;
+
+            std::mt19937 wrng (seed ^ 0x3A7F0000u ^ (unsigned int) n);
+            const auto roll = uniform (wrng);
+            const auto type = std::uniform_int_distribution<int> (1, 6) (wrng);
+            const auto amount = 0.2f + 0.5f * uniform (wrng);
+
+            if (roll < chance)
+            {
+                settings[osc + "_distortion_type"] = (double) type;
+                settings[osc + "_distortion_amount"] = amount;
+            }
+            else
+            {
+                settings[osc + "_distortion_type"] = 0.0;
+            }
+        }
+    }
+
     void Generator::shapeDistortion (const Request& r, nlohmann::json& settings,
                                      unsigned int seed)
     {
@@ -904,6 +966,27 @@ namespace gen
                     0, (int) open.size() - 1) (trng)];
                 settings["distortion_type"] = (double) (r.distortionType >= 0 && r.distortionType < 6
                                                             ? r.distortionType : drawn);
+            }
+        }
+
+        /*  The filters' drive, which saturates inside the filter itself.
+
+            It is a separate stage from the distortion and a gentler one: swept
+            with everything else held still it changes the spectrum by 0.7 dB
+            at 3.5, 1.5 at 10 and 3.4 at 20, where the knob stops, and never
+            moves the level by more than a decibel, so it costs the screen
+            nothing. It rests between half and all of DIRT times 20, which is
+            nothing at zero, 5 to 10 in the middle and 10 to 20 at the top.
+        */
+        if (r.base == nullptr && r.locks.count (schema::Section::filter) == 0)
+        {
+            for (const auto* key : { "filter_1_drive", "filter_2_drive" })
+            {
+                if (! settings.contains (key))
+                    continue;
+                std::mt19937 frng (seed ^ 0xF1D70000u ^ (unsigned int) key[7]);
+                std::uniform_real_distribution<float> within (10.0f * dirt, 20.0f * dirt);
+                settings[key] = within (frng);
             }
         }
 
@@ -1761,6 +1844,7 @@ namespace gen
         synthesiseContent (r, settings, contentrng);
         applyAxes (r, settings, prng);
         switchDistortion (r, settings);
+        chooseWarp (r, settings, seed);
         if (r.base == nullptr)
             wireRouting (*style, r, settings, srng);
         wireMacros (r, result.preset, settings, result);

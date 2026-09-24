@@ -303,7 +303,15 @@ namespace archetype
             { R"(^filter_\d_blend$)",                     0.0f,   1.0f },
             { R"(^filter_2_mix$)",                        0.3f,   1.0f },
             { R"(^filter_\d_keytrack$)",                  0.0f,   1.0f },
-            { R"(^filter_\d_drive$)",                     0.0f,   7.0f },
+            /*  The whole knob, which clamps at 20. DIRT sets it directly and
+                this is only the envelope repair holds a patch to. Swept on
+                patches held otherwise still, it saturates steadily across all
+                of it and moves the level by a decibel at most: 0.7 dB of change
+                in the spectrum at 3.5, 1.5 at 10 and 3.4 at 20. It used to stop
+                at 7, which was the first third of that and inaudible in a busy
+                patch.
+            */
+            { R"(^filter_\d_drive$)",                     0.0f,  20.0f },
             { R"(^eq_high_gain$)",                      -10.0f,  10.0f },
             { R"(^eq_low_gain$)",                       -10.0f,  10.0f },
 
@@ -483,7 +491,7 @@ namespace archetype
         */
         static const std::vector<const char*> bass = {
             "filter_1_cutoff", "distortion_mix", "osc_1_spectral_morph_amount",
-            "osc_1_distortion_amount", "filter_1_resonance" };
+            "filter_1_drive", "filter_1_resonance" };
         static const std::vector<const char*> lead = {
             "filter_1_cutoff", "reverb_dry_wet", "osc_1_spectral_morph_amount",
             "delay_dry_wet", "distortion_mix" };

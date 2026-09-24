@@ -4,39 +4,33 @@ Open work, roughly in the order I would do it. Anything measured is measured, so
 the numbers here come from `vrtest` and from rendering through Vital rather than
 from impressions.
 
-## 1. DIRT has no metric that fits it, and two of its levers do nothing
-
-The distortion itself is settled and written up in the notes under "What DIRT
-does to the distortion": DIRT switches it, sets the drive as a band that starts
-at unity, and opens the circuits in order of how hard they hit. What is left is
-the rest of the axis and the number it is judged by.
+## 1. MOVE is the weakest axis
 
 Agreement by axis, `vrtest --axis=<key> --trials=40`, about 315 pairs each:
 
-| BRIGHT | SPACE | MOVE | DIRT |
+| BRIGHT | SPACE | DIRT | MOVE |
 |---|---|---|---|
-| 99% | 94% | 73% | 61% |
+| 99% | 94% | 80% | 73% |
 
-**The metric.** DIRT is scored on crest, which assumes distortion squashes
-peaks. The clippers resting around unity barely do, and the crushers change the
-tone without doing much to the peak, so crest is the wrong question for most of
-what DIRT now produces. Ten candidates were tried against saved pairs and none
-separated DIRT: the best, spectral flatness, also scored 97% on BRIGHT and 85% on
-SPACE. That was measured while DIRT's distortion was still inaudible, though,
-so it deserves another go now that it makes grit. `--pairs=<dir>` writes the
-pairs for exactly this, and any candidate has to be shown to stay put when
-BRIGHT and SPACE move, or it measures them instead.
+MOVE by style, scored on how far the centroid wanders:
 
-**The levers.** Isolated one family at a time, against two takes of the same
-patch as the unit, DIRT's other parameters came out as:
+| Bass | SFX | Lead | Pad | Experiment | Keys | Percussion | Sequence |
+|---|---|---|---|---|---|---|---|
+| 86% | 85% | 75% | 72% | 71% | 69% | 67% | 65% |
 
-| family | audible change | direction |
-|---|---|---|
-| filter drive | 1.0x | none, inaudible where it sits |
-| oscillator warp | 1.5x | random, it is sync and formant and bend, not grit |
-| unison voices | 1.3x | denser, which is thickness rather than dirt |
+It has had two rounds already, which are in the notes: the metric moved from the
+envelope to tone motion, and MOVE started scaling how far its modulation
+reaches as well as how fast. Nothing has been tried on it since, and the lowest
+styles are the ones whose motion is least about tone: Sequence moves in pitch,
+which the centroid barely sees, and Percussion and Keys are short enough that
+there is little held note for anything to wander in. That points at the metric
+before the axis, which is the order DIRT turned out to need as well.
 
-Whether filter drive stays, or gets a range where it does something, and whether
-oscillator warp belongs to DIRT at all, are open. Anything taken out falls back
-to the general jitter, which no other axis claims, and all four axes need
-re-running afterwards.
+## 2. DIRT reads 80% in the harness and 93% on saved pairs
+
+DIRT is now scored against a clean twin of each patch, and on the same seeds the
+harness reads 82% where the saved pairs read 93%. Holding the note over the same
+window as the pairs changed nothing, and correcting for modulation running on
+between renders came out worse, so the cause is still open. The next step is to
+render one patch through both hosts and compare the audio directly. SFX is the
+lowest style in both, at 65% here.

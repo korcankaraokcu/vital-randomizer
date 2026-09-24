@@ -73,22 +73,26 @@ namespace axes
             dirt.label = "DIRT";
             dirt.params = {
                 w ("^distortion_mix$", 0.9f),
-                w ("^osc_\\d_distortion_amount$", 0.7f),
-                w ("^filter_\\d_drive$", 0.6f),
                 w ("^osc_\\d_unison_voices$", 0.4f),
             };
-            // The distortion's own type is chosen from DIRT in shapeDistortion,
-            // in order of how hard each circuit hits, rather than flipped here.
-            dirt.flip = { std::regex ("^osc_\\d_distortion_type$") };
-            /*  The distortion's switch, drive and circuit are not drawn here.
-                DIRT sets all three directly, the switch before the wiring, the
-                drive as a band on the knob and the circuit in order of how hard
-                it hits, because for most circuits the knob's lower half is a
-                volume control and a skewed draw across it said nothing about
-                grit. See switchDistortion and shapeDistortion.
+            /*  Oscillator warp is not DIRT's any more. Vital calls it the
+                oscillator's distortion, but its types are sync, formant, bend
+                and the like, which reshape the tone in every direction rather
+                than dirtying it, and its first type does nothing at all, which
+                is where most patches sat. COMPLEX chooses it now, in
+                chooseWarp.
+
+                The distortion's switch, drive and circuit, and the filters'
+                drive, are not drawn here either. DIRT sets them directly: the
+                switch before the wiring, the distortion's drive as a band on
+                the knob, the circuit in order of how hard it hits, and the
+                filter drive rising with the slider. For most circuits the
+                knob's lower half is a volume control, so a skewed draw across
+                it said nothing about grit. See switchDistortion and
+                shapeDistortion.
             */
             dirt.macroDests = { "distortion_mix", "distortion_drive",
-                                "osc_1_distortion_amount" };
+                                "filter_1_drive" };
             list.push_back (std::move (dirt));
 
             Axis space;

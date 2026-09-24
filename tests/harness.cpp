@@ -83,6 +83,68 @@ namespace
         return total > 1.0e-9 ? (float) (weighted / total) : 0.0f;
     }
 
+    /*  The held note's spectrum in third octaves, level matched, in dB.
+
+        Normalised to unit RMS first, so two renders that differ only in how
+        loud they are come out the same, and what is left to compare is tone.
+    */
+    std::vector<float> thirdOctaves (const juce::AudioBuffer<float>& audio)
+    {
+        const auto start = (int) (kSampleRate * 0.1);
+        const auto end = juce::jmin (audio.getNumSamples(), (int) (kSampleRate * 0.95));
+        const auto n = end - start;
+        if (n < 4096)
+            return {};
+
+        constexpr int order = 16;
+        constexpr int fftSize = 1 << order;
+        std::vector<float> mono ((size_t) n, 0.0f);
+        double energy = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            float sum = 0.0f;
+            for (int ch = 0; ch < audio.getNumChannels(); ++ch)
+                sum += audio.getSample (ch, start + i);
+            mono[(size_t) i] = sum / (float) juce::jmax (1, audio.getNumChannels());
+            energy += mono[(size_t) i] * mono[(size_t) i];
+        }
+        const auto rms = std::sqrt (energy / n);
+        if (rms < 1.0e-6)
+            return {};
+
+        std::vector<float> data ((size_t) fftSize * 2, 0.0f);
+        for (int i = 0; i < juce::jmin (n, fftSize); ++i)
+        {
+            const auto window = 0.5f - 0.5f * std::cos (2.0f * juce::MathConstants<float>::pi
+                                                        * (float) i / (float) n);
+            data[(size_t) i] = (float) (mono[(size_t) i] / rms) * window;
+        }
+        juce::dsp::FFT fft (order);
+        fft.performFrequencyOnlyForwardTransform (data.data());
+
+        std::vector<float> bands;
+        for (double low = 50.0; low < 16000.0; low *= std::pow (2.0, 1.0 / 3.0))
+        {
+            const auto high = low * std::pow (2.0, 1.0 / 3.0);
+            double power = 0.0;
+            for (int bin = (int) std::ceil (low * fftSize / kSampleRate);
+                 bin < (int) (high * fftSize / kSampleRate) && bin < fftSize / 2; ++bin)
+                power += (double) data[(size_t) bin] * data[(size_t) bin];
+            bands.push_back ((float) (10.0 * std::log10 (power + 1.0e-20)));
+        }
+        return bands;
+    }
+
+    float bandDistance (const std::vector<float>& a, const std::vector<float>& b)
+    {
+        if (a.empty() || a.size() != b.size())
+            return 0.0f;
+        double sum = 0.0;
+        for (size_t i = 0; i < a.size(); ++i)
+            sum += (double) (a[i] - b[i]) * (a[i] - b[i]);
+        return (float) std::sqrt (sum / (double) a.size());
+    }
+
     Score scoreAudio (const juce::AudioBuffer<float>& audio)
     {
         Score s;
@@ -766,9 +828,20 @@ int main (int argc, char** argv)
 
             BRIGHT moves where the energy sits. SPACE leaves sound behind after
             the key is released, so it shows in the tail rather than in the note.
-            MOVE is the envelope refusing to sit still. DIRT drives the signal
-            into distortion, which fills in the gap between peak and average, so
-            its number goes down as the slider goes up.
+            MOVE is the envelope refusing to sit still.
+
+            DIRT is scored against the patch itself. Each side is rendered as
+            rolled and again with its grit taken out, the distortion switched
+            off and the filter drive at zero, and the number is how far apart
+            the two sound, level matched. It used to be the crest factor, on the
+            reasoning that distortion fills in the gap between peak and average,
+            but a clipper resting at unity barely does and a bit crusher does
+            not at all, and crest agreed with the slider half the time. Of eleven
+            candidates tried on saved pairs, this one agreed 93% of the time and
+            was the only one above 70% that did not simply rise with BRIGHT or
+            SPACE: it sat at 38% and 35% on their pairs, since a brighter or
+            wetter patch buries a little of its own grit. Here it reads about
+            80%, and why it reads lower than on the saved pairs is not known.
 
             Scoring all four on the centroid, which is what happened before this
             existed, only ever measured brightness.
@@ -789,8 +862,9 @@ int main (int argc, char** argv)
             { "move",   { "tone motion, %", true,
                           [] (const audition::Measurement& m)
                           { return 100.0f * m.spectralMotion; } } },
-            { "dirt",   { "crest, dB (falls as it rises)", false,
-                          [] (const audition::Measurement& m) { return m.crestDb; } } },
+            // Scored in the loop below, since it needs a second render.
+            { "dirt",   { "grit against its own clean twin, dB", true,
+                          [] (const audition::Measurement&) { return 0.0f; } } },
         };
 
         const auto found = metrics.find (axisKey);
@@ -864,9 +938,41 @@ int main (int argc, char** argv)
                                                       kBlockSize, renders)
                         : audition::audition (*host.processor(), kSampleRate, kBlockSize);
                     if (! m.usable())
+                    {
                         ok = false;
+                    }
+                    else if (axisKey == "dirt")
+                    {
+                        // Three takes each way, because Vital's unison phase
+                        // moves every take and the pairing has to average it.
+                        auto clean = rolled.preset;
+                        auto& cs = clean["settings"];
+                        cs["distortion_on"] = 0.0;
+                        cs["filter_1_drive"] = 0.0;
+                        cs["filter_2_drive"] = 0.0;
+
+                        std::vector<std::vector<float>> dirty, plain;
+                        for (int i = 0; i < 3; ++i)
+                            dirty.push_back (thirdOctaves (renderNote (*host.processor())));
+                        if (! host.applyPreset (clean))
+                        {
+                            ok = false;
+                            break;
+                        }
+                        audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                        for (int i = 0; i < 3; ++i)
+                            plain.push_back (thirdOctaves (renderNote (*host.processor())));
+
+                        std::vector<float> distances;
+                        for (int i = 0; i < 3; ++i)
+                            distances.push_back (bandDistance (dirty[(size_t) i], plain[(size_t) i]));
+                        std::sort (distances.begin(), distances.end());
+                        value[side] = distances[1];
+                    }
                     else
+                    {
                         value[side] = metric.of (m);
+                    }
                 }
 
                 if (! ok)

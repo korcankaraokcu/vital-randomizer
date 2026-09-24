@@ -261,9 +261,8 @@ produce, because nothing is being asked of it.
 
 **Axes**, tested by building the same patch from one seed twice, once with the
 slider low and once high, each scored on the number that axis is meant to move.
-BRIGHT 99%, SPACE 94%, MOVE 73%, DIRT 61%, over about 315 pairs each. DIRT's
-figure is on a metric that is known not to fit it; see "What a slider is worth"
-and the roadmap.
+BRIGHT 99%, SPACE 94%, MOVE 73%, DIRT 80%, over about 315 pairs each;
+see "What a slider is worth".
 
 **Timing**, on a real instance:
 
@@ -639,7 +638,7 @@ existed, only ever measured brightness.
 | BRIGHT | energy centroid | 99% |
 | SPACE | tail against the note | 94% |
 | MOVE | how far the centroid wanders | 73% |
-| DIRT | crest, which falls as drive rises | 61% |
+| DIRT | grit against its own clean twin | 80% |
 
 "One seed means only the axis differs" was not true until recently, and it
 mattered most for DIRT. The wavetables and the sample are built from BRIGHT and
@@ -652,8 +651,28 @@ keyed by its name, and within one seed DIRT and BRIGHT now change nothing else.
 SPACE still re-points a few macros at the reverb and delay, and MOVE rewires,
 because that is what those two axes are for.
 
-DIRT's number is the weak one for a reason covered below: crest assumes the
-distortion squashes peaks, and at the drive DIRT now uses, most of it does not.
+DIRT used to be scored on crest, on the reasoning that distortion fills in the
+gap between peak and average. A clipper resting at unity barely does and a bit
+crusher does not at all, so crest agreed with the slider about half the time,
+and tried against saved pairs ten other audio measures did no better without
+simply reading BRIGHT or SPACE: spectral flatness scored 73% on DIRT but 95% on
+BRIGHT, and counting spectral peaks 72% on DIRT and 96% on BRIGHT.
+
+What works is scoring each side against itself. The patch is rendered three
+times as rolled and three times with its grit taken out, the distortion off and
+the filter drive at zero, and the number is how far apart the two sound,
+level matched, across third octaves. On the saved pairs it agreed with DIRT 93%
+of the time and sat at 38% and 35% on BRIGHT's and SPACE's pairs, below chance
+rather than above it, since a brighter or wetter patch buries a little of its
+own grit.
+
+In the harness it reads 80% over 317 pairs, from 89% on bass down to 65% on SFX,
+and on the same seeds the saved pairs used it reads 82% rather than 93%. What
+makes that gap is not known. The pairs were rendered through a different host,
+and two things that differ between the two were tried and ruled out: holding the
+note and measuring over the same window as the pairs changed nothing, and taking
+off the distance between two takes of one patch, on the idea that modulation
+running on between renders was adding to it, came out at 77% and was dropped.
 
 It caught BRIGHT arguing with itself. An axis switches its effects on when pushed
 and off at the other end, which is right where the effect adds the quality the
@@ -767,6 +786,29 @@ clip or fold patch in thirteen, down to about -8 dB at worst.
 
 The mix is left free across the whole knob. With the drive resting at unity a
 fully wet distortion is a tone rather than a level loss.
+
+**The filters' drive** is the other half of DIRT's grit, a saturation stage
+inside the filter itself. Swept with everything else held still it changes the
+spectrum by 0.7 dB at 3.5, 1.5 at 10 and 3.4 at 20, where the knob clamps, and
+never moves the level by more than a decibel. It used to be drawn between 0 and
+7, the first third of the knob, where a busy patch drowns it. DIRT now sets it
+directly, resting between half and all of DIRT times 20: nothing at zero, 5 to
+10 in the middle, 10 to 20 at the top. Macros that land on it are named GRIT.
+
+**Oscillator warp is not DIRT's.** Vital files it under distortion, but its
+types are sync, formant, bend, squeeze and the like, and at one depth they
+reshape the tone in every direction: most lift the centroid, only one reliably
+fills the spectrum in. And its first type does nothing at all, which is where 42
+patches in 48 sat, so DIRT's warp lever was usually a knob wired to nothing, and
+so were the Bass style's macro on it and any macro DIRT pointed there. COMPLEX
+chooses warp now: each oscillator that is on gets one of the six self-contained
+types with a chance of one in twenty at the bottom of COMPLEX and one in four at
+the top, measured at 6% and 30%. A macro is only wired to a warp amount when a
+warp type is actually set.
+
+What DIRT still owns besides these is the distortion's mix and the number of
+unison voices. Voices are thickness rather than grit, but they move the sound
+consistently in one direction, so they stay.
 
 Two demos exist for listening rather than reading. `vrtest --dirt-ladder=<dir>`
 builds two seeds per style at DIRT 0, 0.25, 0.5, 0.75 and 1, level matched, and

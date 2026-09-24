@@ -108,6 +108,8 @@ namespace gen
         void carrySequenceToEveryVoice (nlohmann::json& settings,
                                         const std::string& driver, float depth);
         void scaleModulationDepth (const Request& r, nlohmann::json& settings);
+        /** Give oscillators a warp type, more often the higher COMPLEX is. */
+        void chooseWarp (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Switch the distortion on or off from DIRT, before the wiring. */
         void switchDistortion (const Request& r, nlohmann::json& settings);
         /** Set the distortion from DIRT and hold whatever moves the drive

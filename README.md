@@ -38,11 +38,12 @@ Then rescan plugins in your DAW.
 
 - **ROLL** makes a fresh patch from the style and the sliders.
 - **BRIGHT / MOVE / DIRT / SPACE** set the character. DIRT at zero switches the
-  distortion off. Further up it drives it harder and lets in harsher circuits:
-  the soft and hard clippers from the start, the folders from 0.4, and the bit
-  crusher and sample rate reducer from 0.7. **COMPLEX** sets how much
-  of the synth a patch is allowed to use, from one oscillator through one filter
-  to three oscillators, both filters and a wall of modulation. Each style starts
+  distortion off and leaves the filters clean. Further up it drives both harder
+  and lets in harsher circuits: the soft and hard clippers from the start, the
+  folders from 0.4, and the bit crusher and sample rate reducer from 0.7.
+  **COMPLEX** sets how much of the synth a patch is allowed to use, from one
+  oscillator through one filter to three oscillators, both filters and a wall of
+  modulation, and how likely its oscillators are to be warped. Each style starts
   where that style usually sits and individual rolls vary around it, so a batch
   holds both sparse patches and busy ones.
 - **VARY** drifts the current patch instead of replacing it, with the small
