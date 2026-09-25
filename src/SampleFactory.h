@@ -40,6 +40,12 @@ namespace sampler
             through.
         */
         std::string model;
+        /*  How much plain noise a metal cluster is mixed with, 0 to 1, for the
+            drum kinds that use one: a hat wants little, a crash wants its
+            wash. Negative leaves it to the model. */
+        float noise = -1.0f;
+        float corner = -1.0f;       // where a metal cluster's tilt turns, Hz
+        int banks = 1;              // sets of six squares in a metal cluster
     };
 
     struct Result

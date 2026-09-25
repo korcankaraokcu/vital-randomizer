@@ -2,6 +2,7 @@
 
 #include "PluginEditor.h"
 #include "Axes.h"
+#include "Drums.h"
 
 #include <algorithm>
 
@@ -231,6 +232,10 @@ gen::Request VitalRandomizerProcessor::buildRequest() const
     if (! scales.empty())
         r.scale = scales[(size_t) juce::Random::getSystemRandom()
                              .nextInt ((int) scales.size())];
+    // One kind of drum off the list, the same way. Any lets the roll choose.
+    if (! drumKinds.empty())
+        r.drumKind = drumKinds[(size_t) juce::Random::getSystemRandom()
+                                   .nextInt ((int) drumKinds.size())];
     return r;
 }
 
@@ -396,6 +401,8 @@ juce::String VitalRandomizerProcessor::requestSignature() const
         s << "|L" << (int) lock;
     for (const auto scale : scales)
         s << "|S" << scale;
+    for (const auto kind : drumKinds)
+        s << "|D" << kind;
     return s;
 }
 
@@ -438,12 +445,14 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
         // patch, so a short one is played and discarded before measuring.
         audition::settle (*preview.processor(), sr, 512);
 
-        measured = audition::auditionAveraged (*preview.processor(), sr, 512);
+        measured = audition::auditionAveraged (*preview.processor(), sr, 512, 3, 48,
+                                               audition::judgedAsHit (currentStyle.toStdString()));
         if (! measured.usable())
             return false;
 
         // A patch can be perfectly healthy and still be the wrong instrument.
-        const auto styleName = currentStyle.toStdString();
+        // Judged as the kind of drum it was built as, where it is one.
+        const auto styleName = drums::profile (currentStyle.toStdString(), result.drumKind);
         /*  Balance before brightness. A patch is allowed high frequency detail
             as long as it stays quiet: what makes a bass a bass is how much of it
             is down low, not where its mean lands.
@@ -520,6 +529,7 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
         // buildRequest draws a fresh scale each time it is called, so the one
         // this patch actually walked has to come from the result.
         request.scale = result.scale;
+        request.drumKind = result.drumKind;
         request.amount = result.amount;
         auto recipe = store::Recipe::fromRequest (request, result.seed);
         if (result.preset.contains ("settings"))
@@ -721,6 +731,48 @@ void VitalRandomizerProcessor::removeScaleChoice (size_t index)
     sendChangeMessage();
 }
 
+std::vector<int> VitalRandomizerProcessor::drumChoices() const
+{
+    const juce::ScopedLock sl (settingsLock);
+    return drumKinds;
+}
+
+void VitalRandomizerProcessor::setDrumChoice (size_t index, int kind)
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        if (index >= drumKinds.size())
+            return;
+        drumKinds[index] = kind;
+    }
+    dropPrefetch();
+    sendChangeMessage();
+}
+
+void VitalRandomizerProcessor::addDrumChoice()
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        if (drumKinds.size() >= drums::all().size())
+            return;
+        drumKinds.push_back (-1);
+    }
+    dropPrefetch();
+    sendChangeMessage();
+}
+
+void VitalRandomizerProcessor::removeDrumChoice (size_t index)
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        if (drumKinds.size() <= 1 || index >= drumKinds.size())
+            return;
+        drumKinds.erase (drumKinds.begin() + (long) index);
+    }
+    dropPrefetch();
+    sendChangeMessage();
+}
+
 void VitalRandomizerProcessor::setLocked (schema::Section section, bool locked)
 {
     dropPrefetch();
@@ -811,6 +863,7 @@ void VitalRandomizerProcessor::getStateInformation (juce::MemoryBlock& destData)
         for (const auto& l : locks)
             j["locks"].push_back (schema::sectionName (l));
         j["scales"] = scales;
+        j["drums"] = drumKinds;
     }
 
     j["candidates"] = candidateStore.toJson();
@@ -849,6 +902,8 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
                 locks.insert (schema::sectionFromName (l.get<std::string>()));
         if (j.contains ("scales") && j["scales"].is_array() && ! j["scales"].empty())
             scales = j["scales"].get<std::vector<int>>();
+        if (j.contains ("drums") && j["drums"].is_array() && ! j["drums"].empty())
+            drumKinds = j["drums"].get<std::vector<int>>();
     }
 
     varyDepth = j.value ("vary", 0.25f);

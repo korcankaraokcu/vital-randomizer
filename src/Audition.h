@@ -158,7 +158,10 @@ namespace audition
         Holding it to the same ceiling as a sparse one rejected almost every
         complex patch rather than every wrong one.
     */
-    Brightness brightnessFor (const std::string& style, float complexity = 0.5f);
+    /*  The rules below take a profile: a style, or for percussion the style
+        and its kind, as in "Percussion/Kick", which is judged by the kind's own
+        numbers. See drums::profile. */
+    Brightness brightnessFor (const std::string& profile, float complexity = 0.5f);
 
     /*  The low end a style has to have, and the loudest it may jump up top.
 
@@ -167,13 +170,13 @@ namespace audition
         happens to land.
     */
     struct BalanceRule { float minLowRatio, maxHighSpike; };
-    BalanceRule balanceFor (const std::string& style);
+    BalanceRule balanceFor (const std::string& profile);
 
     /** Sentinel meaning a style may ring for as long as it likes. */
     inline constexpr float kNoHeldLimit = 1.0e9f;
 
     /** How much of a held note a style may still have late on. */
-    float maxHeldRatioFor (const std::string& style);
+    float maxHeldRatioFor (const std::string& profile);
 
     /*  Whether a style has to give back the note that was pressed.
 
@@ -202,7 +205,7 @@ namespace audition
         float minSalience, maxErrorSemitones;
         bool octavesOnly = true;
     };
-    PitchRule pitchRuleFor (const std::string& style);
+    PitchRule pitchRuleFor (const std::string& profile);
 
     /*  Let a freshly loaded patch settle.
 
@@ -230,8 +233,25 @@ namespace audition
         makes the correction converge rather than chase.
     */
     Measurement auditionAveraged (juce::AudioProcessor& synth, double sampleRate,
-                                  int blockSize, int times = 3, int note = 48);
+                                  int blockSize, int times = 3, int note = 48,
+                                  bool hit = false);
 
+    /*  hit judges a drum over the hit rather than over a held note.
+
+        Everything else here is built around a note being held: brightness is
+        read from 200 ms in, a patch with no level left in the hold is click
+        only, the level is the 90th percentile of the short term windows, and
+        the held note ratio divides late by a window starting at 100 ms. A
+        closed hi-hat is over in 60 ms, so on every one of those it read as
+        silent, as a click, as never stopping, and at a brightness of zero.
+        In hit mode brightness is read from the onset, the level is the loudest
+        window, the early window starts at the onset, and there is no click
+        only rule, since a drum that is only an attack is doing its job.
+    */
     Measurement audition (juce::AudioProcessor& synth, double sampleRate,
-                          int blockSize, int note = 48, bool resetFirst = true);
+                          int blockSize, int note = 48, bool resetFirst = true,
+                          bool hit = false);
+
+    /** Whether a style is judged as a hit. */
+    inline bool judgedAsHit (const std::string& style) { return style == "Percussion"; }
 }

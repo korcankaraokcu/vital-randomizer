@@ -23,6 +23,7 @@
 
 #include "../src/Audition.h"
 #include "../src/CandidateStore.h"
+#include "../src/Drums.h"
 #include "../src/Archetypes.h"
 #include "../src/SampleFactory.h"
 #include "../src/WavetableFactory.h"
@@ -84,14 +85,34 @@ namespace
         return total > 1.0e-9 ? (float) (weighted / total) : 0.0f;
     }
 
+    /*  A style as the harness is given it may name a kind of drum after a
+        slash, "Percussion/Kick", so any kind can be batched, screened or put
+        through the axis test on its own. */
+    std::string styleOfToken (const juce::String& token)
+    {
+        return drums::styleOf (token.toStdString());
+    }
+
+    int kindOfToken (const juce::String& token)
+    {
+        const auto t = token.toStdString();
+        const auto slash = t.find ('/');
+        return slash == std::string::npos ? -1 : drums::indexOf (t.substr (slash + 1));
+    }
+
+    juce::String fileSafe (const juce::String& token)
+    {
+        return token.replace ("/", "_").replace (" ", "_");
+    }
+
     /*  The held note's spectrum in third octaves, level matched, in dB.
 
         Normalised to unit RMS first, so two renders that differ only in how
         loud they are come out the same, and what is left to compare is tone.
     */
-    std::vector<float> thirdOctaves (const juce::AudioBuffer<float>& audio)
+    std::vector<float> thirdOctaves (const juce::AudioBuffer<float>& audio, double from = 0.1)
     {
-        const auto start = (int) (kSampleRate * 0.1);
+        const auto start = (int) (kSampleRate * from);
         const auto end = juce::jmin (audio.getNumSamples(), (int) (kSampleRate * 0.95));
         const auto n = end - start;
         if (n < 4096)
@@ -244,6 +265,7 @@ int main (int argc, char** argv)
     juce::File typesTo;
     juce::File varyTo;
     bool historyCheck = false;
+    juce::File drumsTo;
     // Which scale the gesture demo walks. The shapes read differently on a
     // seven note maqam than on a pentatonic, and the note floor bites hardest
     // on the big scales, so it has to be possible to ask for one.
@@ -285,6 +307,7 @@ int main (int argc, char** argv)
         if (arg.startsWith ("--distortion-types=")) typesTo = juce::File (value);
         if (arg.startsWith ("--vary=")) varyTo = juce::File (value);
         if (arg == "--history-check") historyCheck = true;
+        if (arg.startsWith ("--drums=")) drumsTo = juce::File (value);
         if (arg.startsWith ("--gesture-scale=")) gestureScale = value;
         if (arg.startsWith ("--renders="))
         {
@@ -400,6 +423,134 @@ int main (int argc, char** argv)
         rolled again into a different patch, and then the two sides are no longer
         the same patch with one slider moved.
     */
+    /*  Every kind of drum, built from four seeds each, for listening and for
+        checking each against what it is meant to be.
+
+        Everything else sits at the percussion defaults and each file is level
+        matched the way a roll would be. For each one it prints where the energy
+        sits, how much of it is under 400 Hz, how much is left late in the hold,
+        and the pitch, next to the band the kind is meant to land in. A clap
+        also gets its strikes counted, since the flam is the part of it most
+        likely to go wrong.
+    */
+    if (drumsTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+        drumsTo.createDirectory();
+
+        const auto defaults = archetype::defaultSlidersFor ("Percussion");
+        std::cout << juce::String ("kind").paddedRight (' ', 14)
+                  << juce::String ("centroid").paddedRight (' ', 10)
+                  << juce::String ("band").paddedRight (' ', 14)
+                  << juce::String ("<400 Hz").paddedRight (' ', 9)
+                  << juce::String ("held").paddedRight (' ', 8)
+                  << juce::String ("pitch").paddedRight (' ', 16)
+                  << "extra" << std::endl;
+
+        for (int kind = 0; kind < (int) drums::all().size(); ++kind)
+        {
+            const auto& k = drums::all()[(size_t) kind];
+            for (int s = 0; s < 4; ++s)
+            {
+                gen::Request request;
+                request.style = "Percussion";
+                request.drumKind = kind;
+                request.seed = (unsigned int) (0xD0C0001u + (unsigned int) s * 2654435761u) | 1u;
+                request.amount = 1.0f;
+                request.sliders = {
+                    { "bright", defaults.bright }, { "dirt", defaults.dirt },
+                    { "space", defaults.space },   { "move", defaults.move },
+                    { "complexity", defaults.complexity } };
+
+                auto result = generator.roll (request);
+                if (! result.ok || ! host.applyPreset (result.preset))
+                    continue;
+                audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize,
+                                                           3, 48, true);
+                loudness::normalise (result.preset["settings"], m.rms, m.peak);
+
+                juce::String extra;
+                if (k.flam && host.applyPreset (result.preset))
+                {
+                    audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                    const auto audio = renderNote (*host.processor());
+                    /*  A strike is a fresh attack: the level jumping at least
+                        8 dB above the quietest point of the 4 ms before it,
+                        loud enough to matter, and at least 5 ms after the last
+                        one. Counting every local peak counted the wiggle in the
+                        noise itself and found twenty strikes in every clap. */
+                    const auto window = (int) (kSampleRate * 0.001);
+                    std::vector<float> env;
+                    for (int at = 0; at + window < (int) (kSampleRate * 0.12); at += window)
+                        env.push_back (audio.getRMSLevel (0, at, window));
+                    const auto peak = env.empty() ? 0.0f : *std::max_element (env.begin(), env.end());
+                    int strikes = 0, last = -100;
+                    for (int i = 0; i < (int) env.size(); ++i)
+                    {
+                        auto floor = i == 0 ? 0.0f : env[(size_t) (i - 1)];
+                        for (int j = juce::jmax (0, i - 4); j < i; ++j)
+                            floor = juce::jmin (floor, env[(size_t) j]);
+                        if (env[(size_t) i] > peak * 0.25f && env[(size_t) i] > floor * 2.5f
+                            && i - last >= 5)
+                        {
+                            ++strikes;
+                            last = i;
+                        }
+                    }
+                    extra << strikes << " strikes";
+                }
+
+                if (k.shake && host.applyPreset (result.preset))
+                {
+                    audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                    const auto audio = renderNote (*host.processor());
+                    /*  Strokes while the key is held: the level in 10 ms
+                        windows over the held second, a stroke being a rise to
+                        above the middle of its range from below it. */
+                    const auto window = (int) (kSampleRate * 0.010);
+                    std::vector<float> env;
+                    for (int at = 0; at + window < (int) (kSampleRate * 0.95); at += window)
+                        env.push_back (audio.getRMSLevel (0, at, window));
+                    const auto [low, high] = std::minmax_element (env.begin() + 5, env.end());
+                    const auto middle = 0.5f * (*low + *high);
+                    int strokes = 0;
+                    for (size_t i = 1; i < env.size(); ++i)
+                        if (env[i - 1] < middle && env[i] >= middle)
+                            ++strokes;
+                    extra << strokes << " strokes, "
+                          << juce::String (juce::Decibels::gainToDecibels (*high / juce::jmax (1.0e-6f, *low)), 1)
+                          << " dB deep";
+                }
+
+                const auto name = juce::String (k.name).replace (" ", "_");
+                auto out = result.preset;
+                out.erase ("tuning");
+                out["preset_name"] = (juce::String (k.name) + " " + juce::String (s + 1)).toStdString();
+                drumsTo.getChildFile (name + "_" + juce::String (s + 1) + ".vital")
+                       .replaceWithText (juce::String (out.dump()));
+
+                std::cout << (juce::String (k.name) + " " + juce::String (s + 1)).paddedRight (' ', 14)
+                          << juce::String ((int) m.centroidHz).paddedRight (' ', 10)
+                          << (juce::String ((int) k.brightness.low) + "-" + juce::String ((int) k.brightness.high)).paddedRight (' ', 14)
+                          << (juce::String ((int) (100.0f * m.lowRatio)) + "%").paddedRight (' ', 9)
+                          << juce::String (m.heldRatio, 2).paddedRight (' ', 8)
+                          << ((m.pitchHz > 0.0f ? juce::String ((int) m.pitchHz) + " Hz" : juce::String ("none"))
+                              + " " + juce::String (m.pitchSalience, 2)).paddedRight (' ', 16)
+                          << extra << (m.usable() ? "" : "  UNUSABLE") << std::endl;
+            }
+        }
+        std::cout << "written to " << drumsTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
     /*  Whether history brings a patch back exactly as it was heard.
 
         Patches are made the way the plugin makes them, a fresh roll and then
@@ -1194,7 +1345,8 @@ int main (int argc, char** argv)
         int agreedAll = 0, testedAll = 0;
         for (const auto& styleName : styles)
         {
-            const auto defaults = archetype::defaultSlidersFor (styleName.toStdString());
+            const auto defaults = archetype::defaultSlidersFor (styleOfToken (styleName));
+            const auto hit = audition::judgedAsHit (styleOfToken (styleName));
             int agreed = 0, tested = 0;
             std::vector<float> moves;
 
@@ -1207,7 +1359,8 @@ int main (int argc, char** argv)
                 for (int side = 0; side < 2 && ok; ++side)
                 {
                     gen::Request request;
-                    request.style = styleName.toStdString();
+                    request.style = styleOfToken (styleName);
+                    request.drumKind = kindOfToken (styleName);
                     request.seed = seed;
                     request.amount = 1.0f;
                     request.sliders = {
@@ -1230,7 +1383,7 @@ int main (int argc, char** argv)
                     {
                         auto out = rolled.preset;
                         out.erase ("tuning");
-                        pairsTo.getChildFile (styleName + "_" + juce::String (t).paddedLeft ('0', 2)
+                        pairsTo.getChildFile (fileSafe (styleName) + "_" + juce::String (t).paddedLeft ('0', 2)
                                               + (side == 0 ? "_lo" : "_hi") + ".vital")
                                .replaceWithText (juce::String (out.dump()));
                         continue;
@@ -1244,8 +1397,9 @@ int main (int argc, char** argv)
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
                     const auto m = rendersGiven
                         ? audition::auditionAveraged (*host.processor(), kSampleRate,
-                                                      kBlockSize, renders)
-                        : audition::audition (*host.processor(), kSampleRate, kBlockSize);
+                                                      kBlockSize, renders, 48, hit)
+                        : audition::audition (*host.processor(), kSampleRate, kBlockSize,
+                                              48, true, hit);
                     if (! m.usable())
                     {
                         ok = false;
@@ -1262,7 +1416,7 @@ int main (int argc, char** argv)
 
                         std::vector<std::vector<float>> dirty, plain;
                         for (int i = 0; i < 3; ++i)
-                            dirty.push_back (thirdOctaves (renderNote (*host.processor())));
+                            dirty.push_back (thirdOctaves (renderNote (*host.processor()), hit ? 0.0 : 0.1));
                         if (! host.applyPreset (clean))
                         {
                             ok = false;
@@ -1270,7 +1424,7 @@ int main (int argc, char** argv)
                         }
                         audition::settle (*host.processor(), kSampleRate, kBlockSize);
                         for (int i = 0; i < 3; ++i)
-                            plain.push_back (thirdOctaves (renderNote (*host.processor())));
+                            plain.push_back (thirdOctaves (renderNote (*host.processor()), hit ? 0.0 : 0.1));
 
                         std::vector<float> distances;
                         for (int i = 0; i < 3; ++i)
@@ -1330,7 +1484,7 @@ int main (int argc, char** argv)
     std::map<juce::String, std::vector<float>> stylePitch, styleSalience;
     for (const auto& style : styles)
     {
-        if (archetype::find (style.toStdString()) == nullptr)
+        if (archetype::find (styleOfToken (style)) == nullptr)
         {
             std::cout << "skipping unknown style " << style << "\n";
             continue;
@@ -1349,9 +1503,10 @@ int main (int argc, char** argv)
                         && (statsRolls > 0 || saved < perStyle); ++i)
         {
             gen::Request request;
-            request.style = style.toStdString();
+            request.style = styleOfToken (style);
+            request.drumKind = kindOfToken (style);
             request.amount = 1.0f;
-            const auto preset = archetype::defaultSlidersFor (style.toStdString());
+            const auto preset = archetype::defaultSlidersFor (styleOfToken (style));
             request.sliders = {
                 { "bright", bright >= 0.0f ? bright : preset.bright },
                 { "dirt",   dirt   >= 0.0f ? dirt   : preset.dirt },
@@ -1421,7 +1576,7 @@ int main (int argc, char** argv)
                                        + ", drive at " + juce::String (knob (st.value ("distortion_drive", 0.0))) + "% of the knob"
                                        + ", mix " + juce::String (juce::roundToInt (100.0 * st.value ("distortion_mix", 0.0))) + "%.")
                                           .toStdString();
-                    rejectsTo.getChildFile (style + "_" + why.replace (" ", "")
+                    rejectsTo.getChildFile (fileSafe (style) + "_" + why.replace (" ", "")
                                             + "_drive" + juce::String (knob (st.value ("distortion_drive", 0.0)))
                                             + "_mix" + juce::String (juce::roundToInt (100.0 * st.value ("distortion_mix", 0.0)))
                                             + "_" + juce::String (result.seed) + ".vital")
@@ -1442,7 +1597,10 @@ int main (int argc, char** argv)
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
 
                     auto m = audition::auditionAveraged (*host.processor(), kSampleRate,
-                                                         kBlockSize, renders);
+                                                         kBlockSize, renders, 48,
+                                                         audition::judgedAsHit (styleOfToken (style)));
+                    // Judged as the kind of drum it was built as, where it is one.
+                    const auto profile = drums::profile (styleOfToken (style), result.drumKind);
                     if (! m.usable())
                     {
                         exhausted = false;
@@ -1460,7 +1618,7 @@ int main (int argc, char** argv)
                         fine as long as it is quiet, so what decides whether a
                         bass is a bass is how much of it sits down low.
                     */
-                    const auto balance = audition::balanceFor (style.toStdString());
+                    const auto balance = audition::balanceFor (profile);
                     if (m.lowRatio > 0.0f && m.lowRatio < balance.minLowRatio)
                     {
                         exhausted = false;
@@ -1474,7 +1632,7 @@ int main (int argc, char** argv)
                         break;
                     }
 
-                    const auto bounds = audition::brightnessFor (style.toStdString(),
+                    const auto bounds = audition::brightnessFor (profile,
                                                  request.sliders["complexity"]);
                     if (m.centroidHz > 0.0f
                         && (m.centroidHz < bounds.low || m.centroidHz > bounds.high))
@@ -1509,14 +1667,14 @@ int main (int argc, char** argv)
                         }
                         break;
                     }
-                    if (m.heldRatio > audition::maxHeldRatioFor (style.toStdString()))
+                    if (m.heldRatio > audition::maxHeldRatioFor (profile))
                     {
                         exhausted = false;
                         rejects[style]["note keeps going"]++;
                         if (rejectsTo != juce::File())
                         {
                             rejectsTo.createDirectory();
-                            rejectsTo.getChildFile (style + "_keepsgoing_held"
+                            rejectsTo.getChildFile (fileSafe (style) + "_keepsgoing_held"
                                 + juce::String ((int) (100.0f * m.heldRatio))
                                 + "_decay" + juce::String ((int) (100.0 * settings_decay))
                                 + "_" + juce::String (result.seed) + ".vital")
@@ -1525,7 +1683,7 @@ int main (int argc, char** argv)
                         break;
                     }
 
-                    const auto pitch = audition::pitchRuleFor (style.toStdString());
+                    const auto pitch = audition::pitchRuleFor (profile);
                     const auto stepped = audition::isSteppedStyle (style.toStdString())
                                              && m.steps > 0;
                     const auto salience = stepped ? m.stepSalience : m.pitchSalience;
@@ -1663,8 +1821,12 @@ int main (int argc, char** argv)
                     saveTo.createDirectory();
                     auto out = result.preset;
                     out.erase ("tuning");
-                    saveTo.getChildFile (style + "_" + juce::String (saved).paddedLeft ('0', 2)
-                                             + ".vital")
+                    // A drum says which one it is, since Percussion 4 alone
+                    // could be any of twelve.
+                    const auto kind = out.contains ("drum_kind")
+                                          ? "_" + fileSafe (out["drum_kind"].get<std::string>()) : juce::String();
+                    saveTo.getChildFile (fileSafe (style) + "_" + juce::String (saved).paddedLeft ('0', 2)
+                                             + kind + ".vital")
                           .replaceWithText (juce::String (out.dump()));
                 }
             }

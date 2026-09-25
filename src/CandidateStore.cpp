@@ -18,6 +18,7 @@ namespace store
             r.locks.insert (schema::sectionFromName (l));
         r.name = label;
         r.scale = scale;
+        r.drumKind = drumKind;
         for (const auto& s : varySections)
             r.varySections.insert (schema::sectionFromName (s));
         return r;
@@ -68,6 +69,7 @@ namespace store
             recipe.locks.push_back (schema::sectionName (l));
         recipe.label = r.name;
         recipe.scale = r.scale;
+        recipe.drumKind = r.drumKind;
         for (const auto s : r.varySections)
             recipe.varySections.push_back (schema::sectionName (s));
         return recipe;
@@ -82,6 +84,7 @@ namespace store
         j["locks"] = locks;
         j["label"] = label;
         j["scale"] = scale;
+        j["drum"] = drumKind;
         j["volume"] = volume;
         if (! varySections.empty())
             j["vary_sections"] = varySections;
@@ -98,6 +101,7 @@ namespace store
         r.seed = j.value ("seed", 0u);
         r.label = j.value ("label", std::string {});
         r.scale = j.value ("scale", -1);
+        r.drumKind = j.value ("drum", -1);
         r.volume = j.value ("volume", -1.0f);
         if (j.contains ("vary_sections") && j["vary_sections"].is_array())
             r.varySections = j["vary_sections"].get<std::vector<std::string>>();

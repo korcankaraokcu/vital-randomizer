@@ -1,4 +1,5 @@
 #include "Audition.h"
+#include "Drums.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -50,7 +51,7 @@ namespace audition
     }
 
     Measurement auditionAveraged (juce::AudioProcessor& synth, double sampleRate,
-                                  int blockSize, int times, int note)
+                                  int blockSize, int times, int note, bool hit)
     {
         times = juce::jmax (1, times);
 
@@ -61,7 +62,7 @@ namespace audition
 
         for (int i = 0; i < times; ++i)
         {
-            const auto m = audition (synth, sampleRate, blockSize, note);
+            const auto m = audition (synth, sampleRate, blockSize, note, true, hit);
             if (i == 0)
                 firstRms = m.rms;
             lastRms = m.rms;
@@ -138,8 +139,12 @@ namespace audition
         return sum;
     }
 
-    PitchRule pitchRuleFor (const std::string& style)
+    PitchRule pitchRuleFor (const std::string& profile)
     {
+        // A tuned drum has to sound the note played, an unpitched one cannot.
+        if (const auto* kind = drums::fromProfile (profile))
+            return kind->pitched ? PitchRule { true, 0.35f, 0.60f, true } : PitchRule { false, 0.0f, 0.0f };
+        const auto style = drums::styleOf (profile);
         if (style == "Bass" || style == "Keys" || style == "Lead")
             return { true, 0.45f, 0.45f, true };
         /*  A sequence may sit on any step, it just has to be on one.
@@ -161,8 +166,12 @@ namespace audition
         return { false, 0.0f, 0.0f };
     }
 
-    float maxHeldRatioFor (const std::string& style)
+    float maxHeldRatioFor (const std::string& profile)
     {
+        // A closed hat is gone in a tenth of a second, a crash rings for two.
+        if (const auto* kind = drums::fromProfile (profile))
+            return kind->maxHeld;
+        const auto style = drums::styleOf (profile);
         // A bass is a struck note. Holding the key should not keep it going,
         // and the same goes for a drum.
         /*  A fifth of the early level, late in a held note, is a note that has
@@ -189,8 +198,12 @@ namespace audition
         return kNoHeldLimit;
     }
 
-    BalanceRule balanceFor (const std::string& style)
+    BalanceRule balanceFor (const std::string& profile)
     {
+        // A kick is mostly bottom, a hat is none, and each kind says which.
+        if (const auto* kind = drums::fromProfile (profile))
+            return { kind->minLowRatio, 1.0f };
+        const auto style = drums::styleOf (profile);
         /*  A bass is defined by its balance, not by its mean.
 
             Hand-made basses put a median of 97% of their energy below 400 Hz,
@@ -209,13 +222,18 @@ namespace audition
         return { 0.0f, 1.0f };
     }
 
-    Brightness brightnessFor (const std::string& style, float complexity)
+    Brightness brightnessFor (const std::string& profile, float complexity)
     {
         const auto widen = [complexity] (Brightness b)
         {
             b.high *= 1.0f + 0.45f * juce::jlimit (0.0f, 1.0f, complexity - 0.35f);
             return b;
         };
+        /*  Percussion used to pass anything from 0 to 12 kHz, since a kick
+            and a hi-hat share nothing. Each kind has its own band now. */
+        if (const auto* kind = drums::fromProfile (profile))
+            return widen ({ kind->brightness.low, kind->brightness.high });
+        const auto style = drums::styleOf (profile);
         /*  Recalibrated against the library once the centroid started
             measuring energy rather than magnitude, which moved every one of
             these by roughly a factor of five. Hand-made presets, p90 of the
@@ -278,7 +296,7 @@ namespace audition
     }
 
     Measurement audition (juce::AudioProcessor& synth, double sampleRate,
-                          int blockSize, int note, bool resetFirst)
+                          int blockSize, int note, bool resetFirst, bool hit)
     {
         Measurement m;
         if (sampleRate <= 0.0 || blockSize <= 0)
@@ -288,7 +306,8 @@ namespace audition
         const auto noteOffSample = (int) (kNoteOffAt * sampleRate);
         const auto sustainStart = (int) (0.20 * sampleRate);
         // Two windows taken while the note is still held, to see whether it falls.
-        const auto earlyFrom = (int) (0.10 * sampleRate), earlyTo = (int) (0.45 * sampleRate);
+        const auto earlyFrom = (int) ((hit ? 0.0 : 0.10) * sampleRate);
+        const auto earlyTo = (int) ((hit ? 0.30 : 0.45) * sampleRate);
         const auto lateFrom = (int) (1.20 * sampleRate), lateTo = (int) (1.65 * sampleRate);
         double earlySq = 0.0, lateSq = 0.0;
         int earlyCount = 0, lateCount = 0;
@@ -303,7 +322,7 @@ namespace audition
         // Kept so brightness can be measured once the note has settled. A
         // bass that reads at 8 kHz is not a bass, whatever else is right about
         // it, and that is only visible from the audio.
-        const auto centroidFrom = (int) (0.05 * sampleRate);
+        const auto centroidFrom = (int) ((hit ? 0.0 : 0.05) * sampleRate);
         const auto centroidTo = (int) (1.60 * sampleRate);
         std::vector<float> mono;
         mono.reserve ((size_t) juce::jmax (0, centroidTo - centroidFrom));
@@ -412,7 +431,8 @@ namespace audition
         {
             auto sorted = windows;
             std::sort (sorted.begin(), sorted.end());
-            m.rms = sorted[(size_t) ((sorted.size() - 1) * 9 / 10)];
+            // A hit is as loud as its loudest moment, which is most of it.
+            m.rms = hit ? sorted.back() : sorted[(size_t) ((sorted.size() - 1) * 9 / 10)];
         }
         else
         {
@@ -438,7 +458,7 @@ namespace audition
 
         m.silent = m.rms < kSilenceRms;
         m.clipping = m.peak >= 0.999f;
-        m.clickOnly = ! m.silent && m.rms > 1.0e-9f
+        m.clickOnly = ! hit && ! m.silent && m.rms > 1.0e-9f
                           && (m.sustainRms / m.rms) < kClickRatio;
         m.crestDb = (m.rms > 1.0e-9f && m.peak > 1.0e-9f)
                         ? 20.0f * std::log10 (m.peak / m.rms) : 0.0f;
@@ -452,7 +472,8 @@ namespace audition
 
         const auto early = earlyCount > 0 ? std::sqrt (earlySq / earlyCount) : 0.0;
         const auto late = lateCount > 0 ? std::sqrt (lateSq / lateCount) : 0.0;
-        m.heldRatio = early > 1.0e-9 ? (float) (late / early) : 1.0f;
+        // A hit already over before the late window has stopped, not failed to.
+        m.heldRatio = early > 1.0e-9 ? (float) (late / early) : (hit ? 0.0f : 1.0f);
 
         if (mono.size() >= 2048)
         {
@@ -463,7 +484,7 @@ namespace audition
 
             // The brightness window starts a little after the onset so the
             // attack transient does not dominate it.
-            const auto skip = juce::jmin ((size_t) (0.20 * sampleRate),
+            const auto skip = juce::jmin ((size_t) ((hit ? 0.003 : 0.20) * sampleRate),
                                           mono.size() > 2048 ? mono.size() - 2048 : (size_t) 0);
             juce::dsp::FFT fft (order);
             std::vector<float> data ((size_t) fftSize * 2, 0.0f);

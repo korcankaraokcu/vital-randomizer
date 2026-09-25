@@ -69,9 +69,10 @@ private:
 
     void refreshStyles();
     void refreshFromProcessor();
-    /** Bring the scale row in line with the processor, and show or hide it. */
-    void refreshScales();
-    /** How tall the strip is, which depends on whether the scale row is up. */
+    /** Bring the choice rows in line with the processor, and show the one
+        that belongs to the current style. */
+    void refreshChoiceRows();
+    /** How tall the strip is, which depends on whether a choice row is up. */
     int stripHeight() const;
     void attachVitalEditor();
     void showSettingsMenu();
@@ -99,18 +100,32 @@ private:
     };
     std::vector<LockControl> lockControls;
 
-    /*  The scales a sequence may walk, one dropdown each.
+    /*  A row of dropdowns for a style that has something to choose: the
+        scales a sequence may walk, the kinds of drum percussion may be.
 
-        Only up for Sequence, because it is the only style that walks a scale
-        at all and a row of dead controls on every other style would be worse
-        than no row. The strip grows to make room for it and shrinks again,
-        which keeps the rest of the panel where the user left it.
+        Each is only up for its own style, because a row of dead controls on
+        every other style would be worse than no row. Each dropdown starts on
+        a Random entry meaning anything, and + and - add and drop dropdowns, so
+        a roll draws one entry off the list. The strip grows to make room for
+        the row and shrinks again, which keeps the rest of the panel where the
+        user left it.
     */
-    std::vector<std::unique_ptr<juce::ComboBox>> scaleBoxes;
-    juce::Label scaleLabel;
-    juce::TextButton addScaleButton { "+" };
-    juce::TextButton removeScaleButton { "-" };
-    bool scaleRowUp = false;
+    struct ChoiceRow
+    {
+        juce::String style, caption, anyItem, boxTip, addTip, removeTip;
+        std::function<std::vector<std::pair<std::string, int>>()> menu;
+        std::function<std::vector<int>()> get;
+        std::function<void (size_t, int)> set;
+        std::function<void()> add;
+        std::function<void (size_t)> remove;
+
+        std::vector<std::unique_ptr<juce::ComboBox>> boxes;
+        std::unique_ptr<juce::Label> label;
+        std::unique_ptr<juce::TextButton> plus, minus;
+    };
+    std::vector<std::unique_ptr<ChoiceRow>> choiceRows;
+    ChoiceRow* rowUp = nullptr;
+    void addChoiceRow (std::unique_ptr<ChoiceRow> row);
 
     juce::TextButton rollButton { "ROLL" };
     juce::TextButton varyButton { "VARY" };

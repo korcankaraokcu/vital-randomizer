@@ -32,6 +32,7 @@ target_sources(VitalRandomizer PRIVATE
     src/Schema.cpp
     src/Axes.cpp
     src/Archetypes.cpp
+    src/Drums.cpp
     src/Generator.cpp
     src/Loudness.cpp
     src/CandidateStore.cpp)
@@ -95,6 +96,7 @@ target_sources(vrtest PRIVATE
     src/Schema.cpp
     src/Axes.cpp
     src/Archetypes.cpp
+    src/Drums.cpp
     src/Generator.cpp
     src/CandidateStore.cpp
     src/Loudness.cpp)

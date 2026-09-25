@@ -512,7 +512,19 @@ namespace archetype
         if (style == "Lead")     return lead;
         if (style == "Keys")     return keys;
         if (style == "Pad")      return pad;
+        /*  Drums get knobs that suit a drum and leave its pitch alone. The
+            generic list puts a macro on spectral morph, which reshapes the
+            partials, and a macro rests halfway up its travel, so every drum
+            carried some morph at rest and a tuned tom read four semitones
+            flat for it. */
+        // Mix rather than drive: both are named DRIVE, and the second of two
+        // gets its raw name, which came out as DISTORTION D.
+        static const std::vector<const char*> percussion = {
+            "filter_1_cutoff", "reverb_dry_wet", "distortion_mix",
+            "delay_dry_wet", "reverb_decay_time" };
+
         if (style == "Sequence") return sequence;
+        if (style == "Percussion") return percussion;
         return generic;
     }
 }

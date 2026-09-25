@@ -47,6 +47,8 @@ namespace store
             choice to a handful, and a recipe that did not carry the answer
             would walk a different scale every time history replayed it. */
         int scale = -1;
+        // Which kind of drum a percussion roll was built as, for the same reason.
+        int drumKind = -1;
 
         /*  The level the screen settled on, as Vital's master volume.
 

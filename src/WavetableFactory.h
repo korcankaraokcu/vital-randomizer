@@ -28,6 +28,11 @@ namespace wavetable
         float move = 0.5f;      // the MOVE axis, decides how much the table evolves
         float complexity = 0.5f; // how many keyframes and modifiers to build
         int oscillator = 1;     // 1..3, so the three oscillators differ
+        /*  A drum kind names what its body is made of: the character by name,
+            and how far the partials leave the harmonic series. Empty and
+            negative leave both to the style. */
+        std::string character;
+        float inharmonicLow = -1.0f, inharmonicHigh = -1.0f;
     };
 
     /** A complete wavetable object, ready to drop into settings["wavetables"]. */

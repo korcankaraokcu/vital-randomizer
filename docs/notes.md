@@ -131,22 +131,27 @@ fresh install is all it needs. Then:
   cutoff, a resonance or the drive gets a sustain floor. Both used to read as a
   loud pluck at the start and the layer then dropping out.
 - **SCALES**, on the Sequence style only, lists the scales a riff may be built
-  on. Each dropdown defaults to **Random scale**, meaning the whole table, which
-  is a different thing from the two entries in the table that are called random
-  and pick notes rather than scales; **+** adds
-  another and **-** removes the last, and each roll draws one entry off the
-  list. **random steps** and **random quarter tones** are the odd ones out and
-  keep the behaviour the scales replaced: no ladder, no contour, each step its
-  own draw. The semitone one is snapped by Vital's own quantiser with all
-  twelve bits set; the quarter tone one is placed by hand with the quantiser
-  off, because that quantiser is a twelve bit mask and cannot express a
-  half. A riff has to
-  play enough of its scale to be recognisable as that
-  scale, so the scale carries a floor: three notes of a three or four note
-  chord, four of a five or six note scale, five of anything larger. The step
-  count starts one above that floor, and a line that comes up short has its
-  repeats spent on degrees it has not played yet. Naming a scale changes only the notes the sequence walks, so the same
-  seed gives the same patch with a different set of intervals in it.
+  on. Each dropdown defaults to **Random scale**, meaning the whole table,
+  which is a different thing from the two entries in the table that are called
+  random and pick notes rather than scales. **+** adds another and **-**
+  removes the last, and each roll draws one entry off the list. **random
+  steps** and **random quarter tones** are the odd ones out and keep the
+  behaviour the scales replaced: no ladder, no contour, each step its own
+  draw. The semitone one is snapped by Vital's own quantiser with all twelve
+  bits set, and the quarter tone one is placed by hand with the quantiser off,
+  because that quantiser is a twelve bit mask and cannot express a half. A
+  riff has to play enough of its scale to be recognisable as that scale, so
+  the scale carries a floor: three notes of a three or four note chord, four
+  of a five or six note scale, five of anything larger. The step count starts
+  one above that floor, and a line that comes up short has its repeats spent
+  on degrees it has not played yet. Naming a scale changes only the notes the
+  sequence walks, so the same seed gives the same patch with a different set
+  of intervals in it.
+- **DRUMS**, on the Percussion style only, lists the kinds of drum a roll may
+  build: kick, snare, clap, closed hat, open hat, crash, ride, tom, timpani,
+  cowbell, rim and shaker. Each dropdown defaults to **Random drum**, meaning
+  any of them, and **+** and **-** work as they do for scales. The tuned ones
+  follow the keyboard.
 - **EXPORT** writes the current patch to a `.vital` file.
 - **...** locates Vital if it moved.
 
@@ -262,7 +267,7 @@ produce, because nothing is being asked of it.
 
 **Axes**, tested by building the same patch from one seed twice, once with the
 slider low and once high, each scored on the number that axis is meant to move.
-BRIGHT 99%, SPACE 94%, MOVE 73%, DIRT 80%, over about 315 pairs each;
+BRIGHT 99%, SPACE 94%, MOVE 73%, DIRT 81%, over about 315 pairs each;
 see "What a slider is worth".
 
 **Timing**, on a real instance:
@@ -640,7 +645,7 @@ existed, only ever measured brightness.
 | BRIGHT | energy centroid | 99% |
 | SPACE | tail against the note | 94% |
 | MOVE | how far the centroid wanders | 73% |
-| DIRT | grit against its own clean twin | 80% |
+| DIRT | grit against its own clean twin | 81% |
 
 "One seed means only the axis differs" was not true until recently, and it
 mattered most for DIRT. The wavetables and the sample are built from BRIGHT and
@@ -817,6 +822,145 @@ builds two seeds per style at DIRT 0, 0.25, 0.5, 0.75 and 1, level matched, and
 within a seed only what DIRT sets differs. `vrtest --distortion-types=<dir>`
 builds one patch per style in each of the six circuits at DIRT 0.75, differing
 in the circuit alone.
+
+## The kinds of drum
+
+Percussion used to be one generic hit, a metallic or square oscillator over a
+struck sample with short envelopes, and the screen judged it on almost nothing:
+any brightness from 0 to 12 kHz passed and there was no pitch check. A kick and
+a hi-hat share nothing, so that made neither. There are twelve kinds now, kick,
+snare, clap, closed hat, open hat, crash, ride, tom, timpani, cowbell, rim and
+shaker, each a target the generator builds toward and the screen holds it to.
+They live in `Drums.cpp` as data.
+
+**Calibrated first.** The kinds are only as good as the numbers they are written
+in, and Vital's knobs are not in milliseconds or semitones, so three were swept
+before any kind was written. The envelope decay setting against the time a hit
+takes to fall 40 dB: 0.45 is 28 ms, 0.6 is 86 ms, 0.7 is 162 ms, 0.8 is 270 ms,
+0.9 is 446 ms, 1.0 is 676 ms, 1.1 is 0.95 s, 1.2 is 1.36 s, 1.3 is 1.86 s and
+1.45 is 2.8 s. Filter blend: 0 low pass, 1 band pass, 2 high pass. Depth on
+transpose: 96 semitones per unit, so a three octave kick drop is 0.375.
+
+**Built from parts already there.** A kick is a sine-like body an octave under
+the key with its pitch falling two to three octaves into the note in tens of
+milliseconds, over the thump. A clap is noise alone through a band pass, struck
+three or four times by a one shot LFO before its tail. A cowbell is two squares
+a fifth apart. The noise is a new sample model, flat and at the full rate, since
+a hi-hat lives in the octave the looping models halve away. Vital sends the
+sample layer past both filters by default, so every kind routes it into filter
+one.
+
+**Hats and cymbals are not oscillators.** They began as a strongly inharmonic
+wavetable three octaves up over noise, and even turned right down it made them
+sound wrong, with the character coming from the noise and a tone on top that did
+not belong. It was measured, not only heard: every hat, crash and ride read a
+pitch at 1046 Hz with a salience of 0.7 to 0.95. A wavetable is one repeating
+cycle, so every partial in it is a harmonic of one note, however far the table's
+spectrum is bent. Real cymbals and the drum machines that imitate them are not
+like that. The 808 sums six square waves at 205.3, 304.4, 369.6, 522.7, 540 and
+800 Hz, which add up to no pitch, and band passes the sum at 3440 and 7100 Hz.
+That cluster is now a sample model of its own, Metal: the six moved together and
+a little apart per seed, each rounded to whole hertz so the one second loop is
+seamless, band limited, tilted up the way the 808's band passes tilt it, and
+mixed with noise, little for a hat and a lot for a crash's wash. The four kinds
+run on it with every oscillator off, and the decays follow the 808's, a closed
+hat in about 50 ms, an open one between 90 and 600, a crash up to two seconds.
+Salience fell to between 0.05 and 0.5, the ride the highest, which suits a
+cymbal played for its ping. The tilt was needed: without it the squares'
+fundamentals were the loudest thing in the sample and a ride had a fifth of its
+energy under 400 Hz.
+
+The open hat needed more than that. Ringing for up to half a second it let the
+six squares be picked out one by one, which is heard as a struck chord rather
+than a hat. It gets a second bank of six at an unrelated ratio above the first,
+a tilt turning at 5 to 7 kHz instead of 2.5, more noise and no resonance, and
+its salience fell from about 0.27 to 0.06.
+
+**A timpani is not a sine.** It was a bare fundamental under a low pass, which
+is a bass, and one roll had a formant warp from COMPLEX over heavy distortion
+on top of that. A kettle drum's head rings in modes the bowl and the strike
+narrow to a principal, a fifth, an octave and a tenth, at 1, 1.5, 1.98 and 2.44
+times in about 5 to 4 to 3 to 1, following Synth Secrets' timpani article. Those
+fall within a few cents of harmonics two to five of the note an octave down, so
+the body is a new wavetable character, membrane, played an octave down with the
+principal on the key. The pitch reads an octave below the key, which is what a
+real kettle drum does too: the four imply a fundamental there and the ear finds
+it. Over it is a felt mallet, a new one shot sample that is a short low passed
+thud, and a room, since a timpani is never heard dry. No tuned drum takes a
+warp now.
+
+**A shaker is played, not struck.** Filtered white noise with a short swell was
+a hiss. A real one is many small collisions, beads or seeds hitting a shell,
+which is how Perry Cook's PhISEM shakers in the Synthesis ToolKit build it: at
+random, each a burst of noise dying in a fraction of a millisecond, rung through
+the shell's resonance, 3.2 kHz for a maraca, 3 for a cabasa, 5.5 for a sekere.
+That is a new looping sample, Beads. And it is played back and forth, sha-ka: a
+one shot LFO would give one stroke, so the shaker sustains and a tempo synced
+LFO named Sha-ka swells the beads twice a cycle, the second stroke lighter, on
+sixteenths or eighths, never dropping below a quarter to two fifths of full
+since the beads never stop. A held key keeps shaking, and a tap is one stroke.
+Measured over a held second, the level rises eight times, 10 to 17 dB between
+stroke and trough.
+
+**Named for what it is.** A roll's name carries its kind, so a batch file reads
+Percussion_04_Crash rather than Percussion_04, and the parts in Vital's panels
+say what they are for: the sample Crash metal or Snare noise, the first
+oscillator Tom body. A drum's LFOs are named for where they are wired, Tone,
+Pitch, Level or two of them joined, and Spare when nothing listens. A sequence's
+line is named for its shape because the shape is the riff, but a drum's LFOs are
+ordinary movement ones, so naming them for the drum would say nothing true.
+
+**Held to its kind last.** The axes, the jitter, COMPLEX and the note shape all
+move a patch without knowing it is meant to be a hi-hat, so each kind's bands
+are applied after them: envelope, filter, pitch drop, levels. A value already in
+its band is kept, which is where two kicks differ, and one outside is drawn
+inside, so BRIGHT moves a hat's cutoff within the hat band. Four things had to
+give way for that. The shared repair capped the noise level at 0.26, pulled any
+noise above 0.45 under the oscillators, and switched an oscillator back on under
+a clap. Drums are exempt. COMPLEX's third oscillator could arrive an octave down
+on Vital's drop twelve stack, which put a second pitch under every tuned drum.
+Four unison voices and a spectral morph each smeared a tom's pitch, one by four
+and a half semitones. And a macro on spectral morph rested halfway up, so drums
+have their own macros now.
+
+**The cutoff a player hears.** Velocity and a macro on the cutoff add to it for
+the whole note, a normal strike being 110 of 127 and a macro resting halfway, and
+on a clap those and the strike's sweep took a band pass meant for 1.5 kHz to a
+centre of 13.9 kHz. So a kind's cutoff band describes the cutoff heard at a
+normal strike with the macros where they sit, and the knob is set below it by
+what they add. The shared ranges stop the knob at 110, 4.7 kHz, too low for a
+hat's high pass, so a drum holds its own cutoff up to 130.
+
+**Judged as a hit.** The screen was built around a held note: brightness read
+from 200 ms in, a patch with nothing left in the hold called click only, the
+level the 90th percentile of short windows, and a note that never stops caught
+by dividing late by a window starting at 100 ms. A closed hat is over in 60 ms,
+so it read as silent, as a click, at a brightness of zero, and as never
+stopping. Percussion is auditioned in hit mode now: brightness from the onset,
+the level as the loudest window, the early window from the onset, and no click
+only rule. And each kind carries its own rules: a brightness band, how much of
+it must be bass, how long it may ring and whether it must sound the note.
+
+**Measured.** `vrtest --drums=<dir>` builds every kind from four seeds and
+prints each one against its band. All 48 land in their kind's band and every
+tuned drum is on its note. Screened on their own, `--styles=Percussion/Kick` and
+so on for each kind, 174 of 192 rolls passed, 91%, and the timpani were half the
+rejections, reading as wrong notes while their slow settle was still sounding,
+and after a quicker one the tuned drums passed 31 of 32. The rest are the screen
+doing its job, a hat or shaker darker than its kind. With the hats and cymbals on
+the metal sample, all 192 came out usable, and their median salience fell from
+0.86 to 0.27 on a closed hat, 0.94 to 0.27 on an open one, 0.94 to 0.13 on a
+crash and 0.98 to 0.44 on a ride.
+
+They helped the axes as well, which was part of the reason for them. On
+percussion's own rows, against the same metrics as before, DIRT rose from 87% to
+95% and MOVE from 67% to 77%, with BRIGHT at 95% and SPACE at 100%. A kick, a
+hat and a crash each answer a slider in their own way, and as one generic hit
+they blurred together.
+
+The distortion mix's macro is named DISTORT now, on every style. It and the
+drive both read DRIVE, and the second of two on one patch fell back to its raw
+name cut short, as DISTORTION D.
 
 ## What VARY keeps, and how history brings it back
 

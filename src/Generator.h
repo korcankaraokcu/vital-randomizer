@@ -58,6 +58,10 @@ namespace gen
         /*  Which distortion circuit. Negative lets DIRT choose, which is what a
             roll wants; naming one is for hearing the six against each other. */
         int distortionType = -1;
+        /*  Which kind of percussion, as an index into drums::all(). Negative
+            draws one. A VARY ignores it and keeps the kind of the patch it
+            started from. */
+        int drumKind = -1;
         std::string name;
     };
 
@@ -79,6 +83,10 @@ namespace gen
             that asked for a random scale has no other way of saying which one
             it got, and history has to replay the same one. */
         int scale = -1;
+        /*  The kind of percussion the patch was built as, or -1. Reported for
+            the same reason as the scale: the screen judges a kick and a hi-hat
+            by different rules, and history has to replay the same one. */
+        int drumKind = -1;
         bool ok = false;
         std::string error;
     };
@@ -122,13 +130,17 @@ namespace gen
         void varyMotion (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Give oscillators a warp type, more often the higher COMPLEX is. */
         void chooseWarp (const Request& r, nlohmann::json& settings, unsigned int seed);
+        /** Hold a drum to the bands of its kind, after everything else. */
+        void shapeDrum (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Switch the distortion on or off from DIRT, before the wiring. */
         void switchDistortion (const Request& r, nlohmann::json& settings);
         /** Set the distortion from DIRT and hold whatever moves the drive
             inside the band DIRT allows. */
         void shapeDistortion (const Request& r, nlohmann::json& settings, unsigned int seed);
         void keepStruckNotesStruck (const Request& r, nlohmann::json& settings);
-        std::vector<std::string> repair (nlohmann::json& settings);
+        /** Put a patch back inside the rules every style shares. A drum kind
+            is exempt from the ones its design breaks on purpose. */
+        std::vector<std::string> repair (nlohmann::json& settings, int drumKind = -1);
 
         nlohmann::json initPreset;
     };

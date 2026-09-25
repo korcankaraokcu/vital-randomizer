@@ -7,6 +7,7 @@
 #include <juce_core/juce_core.h>
 
 #include "Axes.h"
+#include "Drums.h"
 #include "Loudness.h"
 #include "SampleFactory.h"
 #include "WavetableFactory.h"
@@ -132,6 +133,10 @@ namespace gen
                 { std::regex ("^distortion_filter_"), "TONE" },
                 { std::regex ("_wave_frame$"), "WAVE" },
                 { std::regex ("distortion_amount"), "WARP" },
+                // How much distortion, against how hard it is driven. Both used
+                // to read DRIVE, and the second of two on one patch got its raw
+                // name cut short, as DISTORTION D.
+                { std::regex ("^distortion_mix$"), "DISTORT" },
                 { std::regex ("^distortion_"), "DRIVE" },
                 { std::regex ("^filter_\\d_drive$"), "GRIT" },
                 { std::regex ("^reverb_"), "REVERB" },
@@ -468,6 +473,17 @@ namespace gen
         // A bed loops for as long as the key is down, which is the one thing a
         // struck style must not do, so those get the struck model or nothing.
         sr.struckOnly = r.style == "Bass" || r.style == "Percussion";
+        // A drum kind names its own layer, which is how a hi-hat gets noise.
+        if (const auto* k = drums::at (r.drumKind))
+        {
+            if (*k->sample != '\0')
+                sr.model = k->sample;
+            if (k->metalNoise.high > 0.0f)
+                sr.noise = k->metalNoise.low + uniform (rng) * (k->metalNoise.high - k->metalNoise.low);
+            if (k->metalCorner.high > 0.0f)
+                sr.corner = k->metalCorner.low + uniform (rng) * (k->metalCorner.high - k->metalCorner.low);
+            sr.banks = k->metalBanks;
+        }
 
         auto built = sampler::create (rng, sr);
         settings["sample"] = std::move (built.sample);
@@ -509,6 +525,12 @@ namespace gen
             wr.move = move;
             wr.complexity = complexity;
             wr.oscillator = i;
+            if (const auto* k = drums::at (r.drumKind))
+            {
+                wr.character = k->character;
+                wr.inharmonicLow = k->inharmonic.low;
+                wr.inharmonicHigh = k->inharmonic.high;
+            }
             tables.push_back (wavetable::create (rng, wr));
         }
         settings["wavetables"] = std::move (tables);
@@ -965,6 +987,393 @@ namespace gen
         return band;
     }
 
+    namespace
+    {
+        /*  A drum's LFOs named for what they move.
+
+            A sequence's step line is named for its shape, since the shape is
+            the riff. A drum has no riff: its LFOs are the ordinary movement
+            ones, wobbling the tone or the level of the hit, and every one of
+            them came out called Generated, which says nothing in Vital's LFO
+            panel. So each is named for where it is wired: Tone, Pitch, Level
+            and so on, two roles joined when it drives both, and Spare when
+            nothing listens to it. The flam keeps its own name.
+        */
+        void nameLfosForWhatTheyMove (nlohmann::json& settings)
+        {
+            if (! settings.contains ("lfos") || ! settings["lfos"].is_array()
+                || ! settings.contains ("modulations"))
+                return;
+
+            const auto roleOf = [] (const std::string& d) -> const char*
+            {
+                const auto has = [&d] (const char* part) { return d.find (part) != std::string::npos; };
+                if (has ("cutoff") || has ("resonance") || has ("blend") || has ("formant"))
+                    return "Tone";
+                if (has ("transpose") || has ("tune"))
+                    return "Pitch";
+                if (has ("_pan"))
+                    return "Pan";
+                if (has ("wave_frame") || has ("spectral") || (has ("osc_") && has ("distortion")))
+                    return "Timbre";
+                if (has ("distortion") || has ("drive"))
+                    return "Grit";
+                if (has ("reverb") || has ("delay") || has ("chorus") || has ("flanger") || has ("phaser"))
+                    return "Space";
+                if (has ("level") || has ("volume"))
+                    return "Level";
+                return "Motion";
+            };
+
+            auto& lfos = settings["lfos"];
+            for (size_t i = 0; i < lfos.size(); ++i)
+            {
+                const auto own = lfos[i].is_object() ? lfos[i].value ("name", std::string()) : std::string();
+                if (! lfos[i].is_object() || own == "Flam" || own == "Sha-ka")
+                    continue;
+
+                const auto source = "lfo_" + std::to_string (i + 1);
+                std::vector<std::string> roles;
+                for (const auto& slot : settings["modulations"])
+                    if (modSource (slot) == source)
+                    {
+                        const std::string role = roleOf (slot.value ("destination", std::string()));
+                        if (std::find (roles.begin(), roles.end(), role) == roles.end())
+                            roles.push_back (role);
+                    }
+
+                std::string name = roles.empty() ? "Spare" : roles[0];
+                if (roles.size() > 1)
+                    name += " + " + roles[1];
+                lfos[i]["name"] = name;
+            }
+        }
+    }
+
+    void Generator::shapeDrum (const Request& r, nlohmann::json& settings, unsigned int seed)
+    {
+        /*  Hold a drum to its kind, after everything else has had its turn.
+
+            The axes, the jitter, COMPLEX and the note shape all move a patch
+            without knowing what drum it is meant to be: COMPLEX can add a
+            second filter as a low pass that buries a hi-hat, and the note shape
+            draws one percussion decay for everything from a closed hat to a
+            crash. So the kind's bands are applied last. A value already inside
+            its band is kept, which is where the variety between two kicks comes
+            from, and one outside it is drawn inside, so BRIGHT moves a hat's
+            cutoff within the hat band rather than out of it.
+
+            A fresh roll also gets the kind's structure: which layers are on,
+            where they sit, the pitch drop and the flam. A VARY keeps the
+            structure it was given and only has its values held to the bands.
+        */
+        const auto* kind = drums::at (r.drumKind);
+        if (r.style != "Percussion" || kind == nullptr)
+            return;
+
+        const auto fresh = r.base == nullptr;
+        const auto base = seed ^ 0xD2E40000u;
+        const auto draw = [base] (const std::string& key, const drums::Band& band)
+        {
+            auto own = streamFor (base, key, 0x71u);
+            return band.low + uniform (own) * (band.high - band.low);
+        };
+        const auto hold = [&] (const std::string& key, const drums::Band& band)
+        {
+            if (! settings.contains (key) || ! settings[key].is_number())
+                return;
+            const auto value = settings[key].get<float>();
+            if (value < band.low - 1.0e-4f || value > band.high + 1.0e-4f)
+                settings[key] = draw (key, band);
+        };
+
+        const auto oscFree = r.locks.count (schema::Section::osc) == 0;
+        const auto filterFree = r.locks.count (schema::Section::filter) == 0;
+        const auto envFree = r.locks.count (schema::Section::env) == 0;
+        const auto modFree = r.locks.count (schema::Section::mod) == 0;
+
+        if (fresh && oscFree)
+        {
+            settings["osc_1_on"] = kind->tonal ? 1.0 : 0.0;
+            if (! kind->tonal)
+            {
+                settings["osc_2_on"] = 0.0;
+                settings["osc_3_on"] = 0.0;
+            }
+            settings["osc_1_transpose"] = kind->transpose;
+            if (settings.value ("osc_2_on", 0.0) >= 0.5)
+                settings["osc_2_transpose"] = kind->secondTranspose;
+
+            /*  A drum's body is one voice with its partials where they fall.
+                Four unison voices, from DIRT's thickness lever, and a spectral
+                morph reshaping the partials each smear a tuned drum's pitch,
+                and one tom read four and a half semitones flat with both. A
+                metallic hat or cymbal keeps its unison, which it wears as
+                density rather than as a pitch.
+            */
+            if (kind->tonal && std::string (kind->character) != "metallic")
+            {
+                settings["osc_1_unison_voices"] = 1.0;
+                settings["osc_1_spectral_morph_amount"] = 0.0;
+            }
+
+            /*  Nor a warp on a tuned drum. COMPLEX's warps bend, fold or
+                formant the wave, and on a tom or a timpani that is no longer
+                the drum: one timpani came out with a formant warp at two thirds
+                over heavy distortion and was not recognisable as one. */
+            if (kind->pitched)
+                for (const auto* osc : { "osc_1", "osc_2", "osc_3" })
+                    settings[std::string (osc) + "_distortion_type"] = 0.0;
+
+            /*  A third oscillator from COMPLEX thickens the body at its own
+                pitch. For percussion it could arrive an octave down and on
+                Vital's drop twelve stack, which put a second, lower pitch under
+                every tuned drum and a sub under the snare, and a wide detuned
+                stack smears a drum's pitch. */
+            if (kind->tonal && settings.value ("osc_3_on", 0.0) >= 0.5)
+            {
+                settings["osc_3_transpose"] = kind->transpose;
+                settings["osc_3_stack_style"] = 0.0;
+                settings["osc_3_unison_voices"] = juce::jmin (2.0, settings.value ("osc_3_unison_voices", 1.0));
+                settings["osc_3_unison_detune"] = juce::jmin (1.0, settings.value ("osc_3_unison_detune", 0.0));
+            }
+            for (const auto* dest : { "osc_1_destination", "osc_2_destination",
+                                      "osc_3_destination", "sample_destination" })
+                settings[dest] = 0.0;
+
+            const auto layered = *kind->sample != '\0';
+            settings["sample_on"] = layered ? 1.0 : 0.0;
+            if (layered)
+                settings["sample_level"] = draw ("sample_level", kind->sampleLevel);
+
+            // Vital shows these names in its oscillator and sample panels, so
+            // the parts of a drum say what they are for.
+            if (layered && settings.contains ("sample") && settings["sample"].is_object())
+                settings["sample"]["name"] = std::string (kind->name) + " "
+                                             + juce::String (kind->sample).toLowerCase().toStdString();
+            if (settings.contains ("wavetables") && settings["wavetables"].is_array())
+            {
+                const char* roles[] = { " body", " second", " layer" };
+                for (size_t i = 0; i < 3 && i < settings["wavetables"].size(); ++i)
+                    if (settings.value ("osc_" + std::to_string (i + 1) + "_on", 0.0) >= 0.5
+                        && settings["wavetables"][i].is_object())
+                        settings["wavetables"][i]["name"] = std::string (kind->name) + roles[i];
+            }
+        }
+        if (oscFree && *kind->sample != '\0')
+            hold ("sample_level", kind->sampleLevel);
+
+        if (fresh && oscFree && kind->body.high > 0.0f)
+            hold ("osc_1_level", kind->body);
+
+        // How far the second envelope throws the filter open at the strike.
+        auto& mods = settings["modulations"];
+        if (fresh && modFree)
+        {
+            const auto depth = draw ("sweep", kind->sweep) / 128.0f;
+            for (size_t i = 0; i < mods.size(); ++i)
+                if (modSource (mods[i]) == "env_2" && modDest (mods[i]) == "filter_1_cutoff")
+                {
+                    settings["modulation_" + std::to_string (i + 1) + "_amount"] = depth;
+                    settings["modulation_" + std::to_string (i + 1) + "_bipolar"] = 0.0;
+                }
+        }
+
+        if (filterFree)
+        {
+            if (fresh)
+            {
+                settings["filter_1_on"] = 1.0;
+                if (! kind->secondFilter)
+                    settings["filter_2_on"] = 0.0;
+            }
+            hold ("filter_1_blend", kind->blend);
+            if (settings.value ("filter_1_resonance", 0.0) > kind->maxResonance)
+                settings["filter_1_resonance"] = kind->maxResonance;
+
+            /*  The cutoff a player hears, not the one on the knob.
+
+                Velocity and a macro wired to the cutoff add to it for the whole
+                note: a normal strike is 110 of 127, and a macro rests where it
+                sits, halfway by default. Measured on a clap, those two and the
+                strike's sweep took a band pass meant for 1.5 kHz to a centre of
+                13.9 kHz. So the band is held on what they add up to, and the
+                knob is set below it. The cutoff's range is 128 semitones, which
+                is what a unit of depth spans.
+            */
+            const auto standing = [&]
+            {
+                double offset = 0.0;
+                for (size_t i = 0; i < mods.size(); ++i)
+                {
+                    if (modDest (mods[i]) != "filter_1_cutoff")
+                        continue;
+                    const auto source = modSource (mods[i]);
+                    double value = -1.0;
+                    if (source == "velocity")
+                        value = 110.0 / 127.0;
+                    else if (source.rfind ("macro_control_", 0) == 0)
+                        value = settings.value (source, 0.5);
+                    if (value < 0.0)
+                        continue;
+                    const auto n = std::to_string (i + 1);
+                    const auto amount = settings.value ("modulation_" + n + "_amount", 0.0);
+                    const auto bipolar = settings.value ("modulation_" + n + "_bipolar", 0.0) >= 0.5;
+                    offset += bipolar ? (value - 0.5) * 2.0 * amount * 64.0 : amount * value * 128.0;
+                }
+                return offset;
+            };
+
+            // The ranges' floor, and a ceiling above the ranges' 110, which is
+            // 4.7 kHz and too low for the high pass that makes a hi-hat.
+            constexpr double kLowest = 28.0, kHighest = 130.0;
+            auto offset = standing();
+            const auto heard = settings.value ("filter_1_cutoff", 0.0) + offset;
+            auto target = heard;
+            if (heard < kind->cutoff.low || heard > kind->cutoff.high)
+                target = draw ("filter_1_cutoff", kind->cutoff);
+
+            // More than the knob can take up: the routings give way instead.
+            if (target - offset < kLowest && offset > 0.0 && modFree)
+            {
+                const auto scale = juce::jmax (0.0, (target - kLowest) / offset);
+                for (size_t i = 0; i < mods.size(); ++i)
+                {
+                    const auto source = modSource (mods[i]);
+                    if (modDest (mods[i]) == "filter_1_cutoff"
+                        && (source == "velocity" || source.rfind ("macro_control_", 0) == 0))
+                    {
+                        const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
+                        settings[key] = settings.value (key, 0.0) * scale;
+                    }
+                }
+                offset = standing();
+            }
+            settings["filter_1_cutoff"] = juce::jlimit (kLowest, kHighest, target - offset);
+        }
+
+        if (envFree)
+        {
+            hold ("env_1_attack", kind->attack);
+            hold ("env_1_decay", kind->decay);
+            hold ("env_1_release", kind->release);
+            if (kind->sustain.high > 0.0f)
+                hold ("env_1_sustain", kind->sustain);
+            else
+                settings["env_1_sustain"] = 0.0;
+        }
+
+        if (fresh && kind->room && r.locks.count (schema::Section::fx) == 0)
+        {
+            settings["reverb_on"] = 1.0;
+            settings["reverb_dry_wet"] = juce::jmax (0.15, settings.value ("reverb_dry_wet", 0.0));
+        }
+
+        /*  The pitch drop: an envelope on the body's transpose, deep enough to
+            start the given number of semitones above the note, and quick
+            enough to land on it before the ear follows the slide. */
+        if (fresh && modFree && kind->drop.high > 0.0f)
+        {
+            const auto depth = draw ("drop", kind->drop) / 96.0f;
+            auto& mods = settings["modulations"];
+            auto found = false;
+            for (size_t i = 0; i < mods.size(); ++i)
+                if (modSource (mods[i]) == "env_2" && modDest (mods[i]) == "osc_1_transpose")
+                {
+                    settings["modulation_" + std::to_string (i + 1) + "_amount"] = depth;
+                    settings["modulation_" + std::to_string (i + 1) + "_bipolar"] = 0.0;
+                    found = true;
+                }
+            if (! found)
+                setModSlot (settings, "env_2", "osc_1_transpose", depth, false);
+            settings["env_2_attack"] = 0.0;
+            settings["env_2_sustain"] = 0.0;
+            settings["env_2_decay"] = draw ("env_2_decay", kind->dropDecay);
+        }
+
+        /*  The flam. Three quick strikes a few milliseconds apart before the
+            body, made with a one shot LFO that ducks the noise between them.
+            The shape is drawn in the LFO's own terms, where a point's height is
+            one minus the value it sends.
+        */
+        if (fresh && kind->flam && modFree && r.locks.count (schema::Section::lfo) == 0
+            && settings.contains ("lfos") && settings["lfos"].is_array() && settings["lfos"].size() >= 8)
+        {
+            // Value 0 is a strike, value 1 is ducked. Pairs share an x to jump.
+            const std::vector<std::pair<float, float>> gate = {
+                { 0.00f, 0.00f }, { 0.10f, 0.85f }, { 0.16f, 0.85f }, { 0.16f, 0.00f },
+                { 0.26f, 0.85f }, { 0.32f, 0.85f }, { 0.32f, 0.00f }, { 0.40f, 0.60f },
+                { 0.44f, 0.60f }, { 0.44f, 0.00f }, { 1.00f, 0.00f } };
+            nlohmann::json points = nlohmann::json::array();
+            nlohmann::json powers = nlohmann::json::array();
+            for (const auto& p : gate)
+            {
+                points.push_back (p.first);
+                points.push_back (1.0f - p.second);
+                powers.push_back (0.0f);
+            }
+            nlohmann::json shape;
+            shape["name"] = "Flam";
+            shape["num_points"] = (int) gate.size();
+            shape["points"] = std::move (points);
+            shape["powers"] = std::move (powers);
+            shape["smooth"] = false;
+            settings["lfos"][7] = std::move (shape);
+
+            settings["lfo_8_sync"] = 0.0;          // seconds, not the tempo
+            settings["lfo_8_sync_type"] = 2.0;     // one shot, like an envelope
+            settings["lfo_8_frequency"] = 4.0;     // one pass in about 60 ms
+
+            const auto level = settings.value ("sample_level", 0.7);
+            setModSlot (settings, "lfo_8", "sample_level", (float) -level, false);
+        }
+
+        /*  The shake. Two strokes to a cycle, sha and ka, each swelling in and
+            falling away, the first a little heavier, in time with the song and
+            restarted by each key, so a held key keeps shaking and a tap is one
+            stroke. Drawn in the same terms as the flam, a point's height being
+            one minus the value it sends.
+        */
+        if (fresh && kind->shake && modFree && r.locks.count (schema::Section::lfo) == 0
+            && settings.contains ("lfos") && settings["lfos"].is_array() && settings["lfos"].size() >= 8)
+        {
+            const auto second = draw ("shake_second", { 0.60f, 0.85f });  // how heavy the ka is
+            const auto swell = draw ("shake_swell", { 0.08f, 0.16f });    // how long a stroke takes to come in
+            const auto rest = draw ("shake_rest", { 0.25f, 0.40f });      // the beads never stop
+
+            // Strength of the stroke at x, 1 at its peak.
+            const std::vector<std::pair<float, float>> strokes = {
+                { 0.0f, rest }, { swell, 1.0f }, { 0.5f, rest },
+                { 0.5f + swell, second }, { 1.0f, rest } };
+            nlohmann::json points = nlohmann::json::array();
+            nlohmann::json powers = nlohmann::json::array();
+            for (size_t i = 0; i < strokes.size(); ++i)
+            {
+                points.push_back (strokes[i].first);
+                points.push_back (strokes[i].second);        // 1 - (1 - strength)
+                // Easing in, falling away quickly then trailing off.
+                powers.push_back (i % 2 == 0 ? 1.5f : -2.5f);
+            }
+            nlohmann::json shape;
+            shape["name"] = "Sha-ka";
+            shape["num_points"] = (int) strokes.size();
+            shape["points"] = std::move (points);
+            shape["powers"] = std::move (powers);
+            shape["smooth"] = false;
+            settings["lfos"][7] = std::move (shape);
+
+            settings["lfo_8_sync"] = 1.0;            // to the tempo
+            settings["lfo_8_sync_type"] = 0.0;       // restarted by each key
+            // One cycle an eighth or a quarter, so the strokes fall on
+            // sixteenths or eighths. A synced cycle lasts two to the power of
+            // seven minus the tempo in seconds at 120 BPM: nine is an eighth.
+            settings["lfo_8_tempo"] = draw ("shake_tempo", { 0.0f, 1.0f }) < 0.6f ? 9.0 : 8.0;
+
+            const auto level = settings.value ("sample_level", 0.7);
+            setModSlot (settings, "lfo_8", "sample_level", (float) -level, false);
+        }
+    }
+
     void Generator::switchDistortion (const Request& r, nlohmann::json& settings)
     {
         /*  On for any DIRT above nothing, off at nothing.
@@ -1366,8 +1775,8 @@ namespace gen
         {
             const auto& dest = result.macroDests[static_cast<size_t> (i)];
             auto name = macroName (dest, i + 1);
-            // distortion_mix and distortion_drive both read as DRIVE, and two
-            // identically named knobs are worse than one clumsy name.
+            // Two knobs named alike are worse than one clumsy name, so the
+            // second of any pair falls back to its parameter's own.
             if (seen.count (name) > 0)
                 name = rawName (dest, i + 1);
             seen.insert (name);
@@ -1501,6 +1910,11 @@ namespace gen
                 continue;
 
             pitchDrivers.insert (source);
+
+            // A drum's pitch drop falls into the note, so it is part of the hit
+            // rather than a wrong note, and shapeDrum sets how deep it goes.
+            if (r.style == "Percussion" && source.rfind ("env_", 0) == 0)
+                continue;
 
             const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
             const auto amount = (float) settings.value (key, 0.0);
@@ -1783,14 +2197,26 @@ namespace gen
 
     // --------------------------------------------------------------- repair ---
 
-    std::vector<std::string> Generator::repair (nlohmann::json& settings)
+    std::vector<std::string> Generator::repair (nlohmann::json& settings, int drumKind)
     {
         std::vector<std::string> notes;
+
+        /*  Three of the rules below are wrong for a drum, and a drum's own
+            bands already hold what they would. A hi-hat, a snare's rattle, a
+            clap and a shaker are noise first, so the noise layer may be louder
+            than the shared ceiling and louder than the oscillators, and a clap
+            or shaker has no oscillator at all. Run on a drum, those rules put
+            every snare's noise at the same quiet level under its body and
+            switched an oscillator back on under every clap.
+        */
+        const auto* drum = drums::at (drumKind);
 
         // Nothing may sit outside the range it is allowed to be in.
         for (auto it = settings.begin(); it != settings.end(); ++it)
         {
             if (! it.value().is_number())
+                continue;
+            if (drum != nullptr && (it.key() == "sample_level" || it.key() == "filter_1_cutoff"))
                 continue;
             float low = 0.0f, high = 0.0f;
             if (! archetype::rangeFor (it.key(), low, high))
@@ -1864,7 +2290,7 @@ namespace gen
                 && settings.value ("osc_" + std::to_string (i) + "_level", 0.0) > 0.02)
                 ++audibleOscs;
 
-        if (audibleOscs == 0)
+        if (audibleOscs == 0 && (drum == nullptr || drum->tonal))
         {
             settings["osc_1_on"] = 1.0;
             settings["osc_1_level"] = std::max (0.6, settings.value ("osc_1_level", 0.0));
@@ -1874,7 +2300,7 @@ namespace gen
         // Noise belongs under the oscillators, not over them, and a noise layer
         // switched on at no level is the same switch in the wrong position an
         // oscillator can be left in.
-        if (settings.value ("sample_on", 0.0) >= 0.5
+        if (drum == nullptr && settings.value ("sample_on", 0.0) >= 0.5
             && settings.value ("sample_level", 0.0) > 0.45)
         {
             settings["sample_level"] = 0.3;
@@ -1988,6 +2414,39 @@ namespace gen
             adjusted.sliders["complexity"] = juce::jlimit (0.0f, 1.0f,
                 asked + off * std::abs (off) * 0.38f * request.complexityWobble);
         }
+        /*  Which drum, for percussion, decided before anything is built.
+
+            A VARY keeps the kind of the patch it started from, read back from
+            the patch, so a VARY of a kick is never clamped into a hi-hat's
+            bands by whatever the menu happens to allow. A fresh roll takes the
+            kind it was asked for, or draws one from a stream of its own. The
+            kind's archetype then stands in for the generic percussion one.
+        */
+        archetype::Archetype drumArchetype;
+        if (request.style == "Percussion")
+        {
+            std::mt19937 krng (seed ^ 0xD7E50000u);
+            const auto drawn = std::uniform_int_distribution<int> (
+                0, (int) drums::all().size() - 1) (krng);
+            auto kind = -1;
+            if (request.base != nullptr)
+                kind = drums::indexOf (request.base->value ("drum_kind", std::string {}));
+            else
+                kind = drums::at (request.drumKind) != nullptr ? request.drumKind : drawn;
+
+            adjusted.drumKind = kind;
+            result.drumKind = kind;
+            if (const auto* k = drums::at (kind))
+            {
+                drumArchetype = *style;
+                drumArchetype.settings.insert (drumArchetype.settings.end(),
+                                               k->settings.begin(), k->settings.end());
+                drumArchetype.routings.insert (drumArchetype.routings.end(),
+                                               k->routings.begin(), k->routings.end());
+                style = &drumArchetype;
+            }
+        }
+
         const Request& r = adjusted;
         result.amount = r.amount;
 
@@ -2031,11 +2490,23 @@ namespace gen
         keepStruckNotesStruck (r, settings);
         shapeDistortion (r, settings, seed);
         applyNoteShape (r, settings, prng);
+        shapeDrum (r, settings, seed);
         constrainPitch (r, settings, srng, result.scale);
-        result.repairs = repair (settings);
+        result.repairs = repair (settings, r.drumKind);
 
         result.preset["preset_style"] = r.style;
         result.preset["preset_name"] = r.name;
+        if (const auto* k = drums::at (r.drumKind))
+        {
+            result.preset["drum_kind"] = std::string (k->name);
+            /*  Named for what it is, the way a sequence's line is named for its
+                shape. Nothing in the patch said which drum it had been built
+                as, so a batch file called Percussion 4 could have been any of
+                twelve. */
+            result.preset["preset_name"] = r.name.empty() ? std::string (k->name)
+                                                          : r.name + " (" + k->name + ")";
+            nameLfosForWhatTheyMove (settings);
+        }
         result.preset["author"] = "";
         // Doubles as the marker the host checks to confirm Vital took the patch.
         result.preset["comments"] = "vr:" + std::to_string (seed);

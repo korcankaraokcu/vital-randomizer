@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 #include <juce_core/juce_core.h>
@@ -485,6 +486,176 @@ namespace sampler
             it from sounding like a relative of the struck body: that rings at
             fixed pitches and this arrives at one.
         */
+        /*  Noise, and nothing else.
+
+            The snare's rattle, a clap, the hats, the cymbals and a shaker are
+            all noise before anything else, and none of the models above is: a
+            bed is shaped into a texture and grit is sparse crackle. This is
+            flat, and the drum's own filter decides what part of it is heard.
+            It loops, since a crash rings for longer than one pass, and a seam
+            in white noise is inaudible, so it needs no crossfade. It is kept at
+            the full rate, where the looping models are halved, because a hi-hat
+            lives in the octave that halving would throw away.
+        */
+        std::vector<float> whiteNoise (std::mt19937& rng, const Request&)
+        {
+            std::vector<float> a ((size_t) kLength, 0.0f);
+            for (auto& v : a)
+                v = 0.5f * uniform (rng, -1.0f, 1.0f);
+            return a;
+        }
+
+        /*  The metal of a hi-hat or a cymbal, the way the 808 makes it.
+
+            A drum machine's hats, cymbal and cowbell share a bank of six square
+            wave oscillators at frequencies that add up to no pitch, 205.3,
+            304.4, 369.6, 522.7, 540 and 800 Hz on the 808, band passed at 3440
+            and 7100 Hz and high passed. What matters is not the exact
+            frequencies but that the sum is an inharmonic hum. An oscillator in
+            Vital cannot make that, since a wavetable is one repeating cycle and
+            every partial in it is a harmonic of one pitch: the metallic tables
+            the cymbals used to be built on measured a clear note at 1046 Hz,
+            which is what made them sound wrong however far down they were
+            turned.
+
+            So the cluster is built here, as the sample. The six are moved up
+            or down together and a little apart, for variety between two hats,
+            and each is rounded to a whole number of hertz so it completes whole
+            cycles in the one second loop and the seam is silent. They are band
+            limited, odd harmonics up to the top of the band only, since a naive
+            square at these pitches folds a second, unintended cluster back down
+            from the top, and tilted up, as the 808 band passes its own. Plain
+            noise is mixed in to taste, and the drum's own filter chooses which
+            part of it is heard.
+        */
+        std::vector<float> metalCluster (std::mt19937& rng, const Request& r)
+        {
+            static const float base[] = { 205.3f, 304.4f, 369.6f, 522.7f, 540.0f, 800.0f };
+            std::vector<double> sum ((size_t) kLength, 0.0);
+            const auto shift = uniform (rng, 0.85f, 1.25f);
+            const auto corner = r.corner > 0.0f ? (double) r.corner : 2500.0;
+
+            /*  A second bank, when asked for, sits at an unrelated ratio above
+                the first. Twelve partials ringing together blur into a sheen
+                where six can be picked out one by one, which is what makes a
+                long hat sound like a struck chord. */
+            std::vector<double> bank { 1.0 };
+            for (int b = 1; b < r.banks; ++b)
+                bank.push_back ((double) uniform (rng, 1.31f, 1.47f) * (double) b);
+
+            for (const auto scale : bank)
+            for (const auto f0 : base)
+            {
+                const auto hz = std::round ((double) f0 * shift * scale * uniform (rng, 0.96f, 1.04f));
+                const auto phase = (double) uniform (rng, 0.0f, 6.2831853f);
+                for (int k = 1; k * hz < kRate * 0.5; k += 2)
+                {
+                    // A rotating phasor rather than a sine per sample, which is
+                    // the difference between a few million sines and none.
+                    const auto step = 2.0 * juce::MathConstants<double>::pi * k * hz / kRate;
+                    const std::complex<double> turn (std::cos (step), std::sin (step));
+                    std::complex<double> z (std::cos (k * phase), std::sin (k * phase));
+                    /*  Tilted up the way the 808's own band passes tilt it.
+                        The squares' fundamentals, 200 to 800 Hz, are the
+                        loudest part of a raw cluster, and a synth's filter
+                        does not take enough off them: the first cymbals built
+                        this way had a fifth of their energy under 400 Hz. */
+                    const auto ratio = (k * hz / corner) * (k * hz / corner);
+                    const auto amp = ratio / (1.0 + ratio) / k;
+                    for (auto& v : sum)
+                    {
+                        v += amp * z.imag();
+                        z *= turn;
+                    }
+                }
+            }
+
+            double peak = 1.0e-9;
+            for (const auto v : sum)
+                peak = std::max (peak, std::abs (v));
+
+            const auto noise = r.noise >= 0.0f ? juce::jlimit (0.0f, 1.0f, r.noise) : 0.2f;
+            std::vector<float> a ((size_t) kLength, 0.0f);
+            for (size_t i = 0; i < a.size(); ++i)
+                a[i] = 0.5f * ((1.0f - noise) * (float) (sum[i] / peak) + noise * uniform (rng, -1.0f, 1.0f));
+            return a;
+        }
+
+        /*  Beads in a shell, the way Perry Cook's PhISEM shakers make them.
+
+            A shaker's sound is many small collisions at random, each a burst
+            of noise that dies in a fraction of a millisecond, all rung through
+            the resonance of the shell. Cook's models give the numbers: a
+            maraca's shell at 3.2 kHz with a pole radius of 0.96, a cabasa's at
+            3 kHz and 0.7, a sekere's at 5.5 kHz and 0.6, each burst decaying by
+            0.95 or 0.96 a sample. The shaking itself, how hard and when, is
+            left to the patch, so this is a steady shake that loops: plain noise
+            under a filter is a hiss, where this has grain.
+        */
+        std::vector<float> beads (std::mt19937& rng, const Request&)
+        {
+            const auto shell = (double) uniform (rng, 2800.0f, 5800.0f);
+            const auto radius = (double) uniform (rng, 0.60f, 0.96f);
+            const auto rate = (double) uniform (rng, 500.0f, 1600.0f);     // collisions a second
+            const auto burstDecay = (double) uniform (rng, 0.94f, 0.965f);
+
+            const auto w = 2.0 * juce::MathConstants<double>::pi * shell / kRate;
+            const auto a1 = 2.0 * radius * std::cos (w);
+            const auto a2 = radius * radius;
+
+            std::vector<float> a ((size_t) kLength, 0.0f);
+            double energy = 0.0, x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+            // One pass to settle the filter, the second kept, so the loop's
+            // first sample follows on from a shell already ringing.
+            for (int pass = 0; pass < 2; ++pass)
+                for (int i = 0; i < kLength; ++i)
+                {
+                    if (uniform (rng) < rate / kRate)
+                        energy += (double) uniform (rng, 0.3f, 1.0f);
+                    const auto x = energy * (double) uniform (rng, -1.0f, 1.0f);
+                    energy *= burstDecay;
+                    const auto y = x - x2 + a1 * y1 - a2 * y2;
+                    x2 = x1; x1 = x; y2 = y1; y1 = y;
+                    if (pass == 1)
+                        a[(size_t) i] = (float) y;
+                }
+
+            double power = 0.0;
+            for (const auto v : a)
+                power += (double) v * v;
+            const auto rms = std::sqrt (power / kLength);
+            const auto gain = rms > 1.0e-9 ? 0.25 / rms : 0.0;
+            for (auto& v : a)
+                v = juce::jlimit (-0.95f, 0.95f, (float) (v * gain));
+            return a;
+        }
+
+        /*  A felt mallet on a drum head: a thud rather than a click, a short
+            burst of noise under a low pass, gone in a few tens of milliseconds,
+            with the rest of the second silent. */
+        std::vector<float> mallet (std::mt19937& rng, const Request&)
+        {
+            const auto corner = (double) uniform (rng, 700.0f, 1800.0f);
+            const auto tau = (double) uniform (rng, 0.008f, 0.020f) * kRate;
+            const auto rise = (int) (kRate * 0.0015);
+            const auto pole = std::exp (-2.0 * juce::MathConstants<double>::pi * corner / kRate);
+
+            std::vector<float> a ((size_t) kLength, 0.0f);
+            double lp1 = 0.0, lp2 = 0.0, peak = 1.0e-9;
+            for (int i = 0; i < kLength; ++i)
+            {
+                const auto shape = (i < rise ? 0.5 - 0.5 * std::cos (juce::MathConstants<double>::pi * i / rise) : 1.0)
+                                   * std::exp (-(double) i / tau);
+                lp1 = (1.0 - pole) * (double) uniform (rng, -1.0f, 1.0f) + pole * lp1;
+                lp2 = (1.0 - pole) * lp1 + pole * lp2;
+                a[(size_t) i] = (float) (shape * lp2);
+                peak = std::max (peak, std::abs ((double) a[(size_t) i]));
+            }
+            for (auto& v : a)
+                v = (float) (0.9 * v / peak);
+            return a;
+        }
+
         std::vector<float> thump (std::mt19937& rng, const Request& r)
         {
             std::vector<float> a ((size_t) kLength, 0.0f);
@@ -598,6 +769,7 @@ namespace sampler
             std::vector<float> (*build) (std::mt19937&, const Request&);
             bool loop, keytrack;
             float lowLevel, highLevel;
+            bool fullRate = false;   // looping, but kept at the full rate
         };
 
         //                name      build            loop   track  level range
@@ -608,6 +780,11 @@ namespace sampler
         static const Model rising { "Swell",  &swell,         false, false, 0.15f, 0.38f };
         static const Model vocal  { "Voice",  &voice,         true,  false, 0.08f, 0.20f };
         static const Model thumped{ "Thump",  &thump,         false, true,  0.20f, 0.50f };
+        // Only for the drum kinds that ask for it by name.
+        static const Model noise  { "Noise",  &whiteNoise,    true,  false, 0.30f, 0.70f, true };
+        static const Model metal  { "Metal",  &metalCluster,  true,  false, 0.40f, 0.80f, true };
+        static const Model beaded { "Beads",  &beads,         true,  false, 0.40f, 0.80f, true };
+        static const Model felt   { "Mallet", &mallet,        false, false, 0.20f, 0.45f };
 
         std::vector<const Model*> allowed;
         if (request.style == "Bass")
@@ -661,7 +838,8 @@ namespace sampler
         }
 
         static const Model* const everything[] = { &bed, &struck, &pluck,
-                                                   &gritty, &rising, &vocal, &thumped };
+                                                   &gritty, &rising, &vocal, &thumped, &noise, &metal,
+                                                   &beaded, &felt };
 
         const Model* model = nullptr;
         if (! request.model.empty())
@@ -675,7 +853,7 @@ namespace sampler
 
         Result result;
         result.sample = encode (model->build (rng, request), model->name,
-                                model->loop ? kLoopRate : kRate);
+                                model->loop && ! model->fullRate ? kLoopRate : kRate);
         result.loop = model->loop;
         result.keytrack = model->keytrack;
         result.level = uniform (rng, model->lowLevel, model->highLevel);

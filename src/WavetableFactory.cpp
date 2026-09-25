@@ -31,7 +31,7 @@ namespace wavetable
             table of pure noise is technically more varied and sounds like a
             fault.
         */
-        enum class Character { fundamental, saw, square, pulse, formant, metallic, vocal, airy };
+        enum class Character { fundamental, saw, square, pulse, formant, metallic, vocal, airy, membrane };
 
         struct Spectrum
         {
@@ -83,6 +83,16 @@ namespace wavetable
                 case Character::airy:
                     amp = std::exp (-0.06f * n) + 0.12f / n;
                     break;
+                case Character::membrane:
+                {
+                    /*  A timpani's preferred modes, principal, fifth, octave
+                        and tenth, as harmonics two to five, in 5 to 4 to 3 to
+                        1, with a trace of the note below them. Returned as they
+                        are: a rolloff or a tilt on top would change the drum's
+                        own balance. */
+                    static const float modes[] = { 0.10f, 1.0f, 0.8f, 0.6f, 0.2f, 0.05f };
+                    return h <= 6 ? modes[h - 1] : 0.0f;
+                }
             }
 
             if (s.tilt > 0.0f && h % 2 == 0)
@@ -195,6 +205,23 @@ namespace wavetable
             const auto unpitched = r.style == "SFX" || r.style == "Experiment"
                                        || r.style == "Percussion";
             s.inharmonic = unpitched ? uniform (rng, 0.0f, 1.0f) : 0.0f;
+            /*  A drum kind's own body, applied over the style's draws rather
+                than instead of them, so every other style draws exactly the
+                numbers it always did. */
+            if (! r.character.empty())
+            {
+                static const std::pair<const char*, Character> names[] = {
+                    { "fundamental", Character::fundamental }, { "saw", Character::saw },
+                    { "square", Character::square }, { "pulse", Character::pulse },
+                    { "formant", Character::formant }, { "metallic", Character::metallic },
+                    { "vocal", Character::vocal }, { "airy", Character::airy },
+                    { "membrane", Character::membrane } };
+                for (const auto& n : names)
+                    if (r.character == n.first)
+                        s.character = n.second;
+            }
+            if (r.inharmonicLow >= 0.0f)
+                s.inharmonic = uniform (rng, r.inharmonicLow, juce::jmax (r.inharmonicLow, r.inharmonicHigh));
             s.formantWidth = uniform (rng, 0.8f, 3.0f);
             for (auto& f : s.formants)
                 f = uniform (rng, 1.5f, 22.0f);

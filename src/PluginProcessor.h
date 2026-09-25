@@ -89,6 +89,13 @@ public:
     void addScaleChoice();
     void removeScaleChoice (size_t index);
 
+    /*  Which kinds of drum percussion may be, in the same shape: a list, each
+        entry an index into drums::all() or -1 for any kind. */
+    std::vector<int> drumChoices() const;
+    void setDrumChoice (size_t index, int kind);
+    void addDrumChoice();
+    void removeDrumChoice (size_t index);
+
     void setLocked (schema::Section section, bool locked);
     bool isLocked (schema::Section section) const;
 
@@ -173,6 +180,7 @@ private:
     juce::CriticalSection settingsLock;
     std::map<juce::String, float> sliders;
     std::vector<int> scales { -1 };
+    std::vector<int> drumKinds { -1 };
     std::set<schema::Section> locks;
     std::atomic<float> varyDepth { 0.25f };
 
