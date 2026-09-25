@@ -497,11 +497,48 @@ namespace sampler
             the full rate, where the looping models are halved, because a hi-hat
             lives in the octave that halving would throw away.
         */
-        std::vector<float> whiteNoise (std::mt19937& rng, const Request&)
+        std::vector<float> whiteNoise (std::mt19937& rng, const Request& r)
         {
             std::vector<float> a ((size_t) kLength, 0.0f);
             for (auto& v : a)
-                v = 0.5f * uniform (rng, -1.0f, 1.0f);
+                v = 0.95f * uniform (rng, -1.0f, 1.0f);
+            if (r.corner <= 0.0f)
+                return a;
+
+            /*  Given a corner, kept to the band a clap is heard in, from it up
+                to 7 kHz, and saturated. Heard through a band pass, white noise
+                at full scale spends most of its energy where it is thrown away,
+                and the clap came out up to 12 dB quieter than it had to be,
+                more than the master volume could make up. Narrowing the band
+                alone gains little, since filtered noise has taller peaks for
+                the same energy. Saturating it brings the peaks back down to
+                the body of the noise, which is still heard as noise, and at the
+                same peak the band plays several decibels louder. The loop runs
+                twice so the second pass starts from a settled filter. */
+            const auto pi = juce::MathConstants<double>::pi;
+            const auto lowPole = std::exp (-2.0 * pi * (double) r.corner / kRate);
+            const auto highPole = std::exp (-2.0 * pi * 7000.0 / kRate);
+            double l1 = 0.0, l2 = 0.0, h1 = 0.0, h2 = 0.0;
+            std::vector<double> band (a.size());
+            for (int pass = 0; pass < 2; ++pass)
+                for (size_t i = 0; i < a.size(); ++i)
+                {
+                    const auto x = (double) a[i];
+                    l1 = (1.0 - lowPole) * x + lowPole * l1;
+                    l2 = (1.0 - lowPole) * l1 + lowPole * l2;
+                    const auto above = x - l2;
+                    h1 = (1.0 - highPole) * above + highPole * h1;
+                    h2 = (1.0 - highPole) * h1 + highPole * h2;
+                    band[i] = h2;
+                }
+            double power = 0.0;
+            for (const auto v : band)
+                power += v * v;
+            const auto rms = std::sqrt (power / (double) band.size()) + 1.0e-12;
+            for (size_t i = 0; i < a.size(); ++i)
+                a[i] = (float) (0.95 * std::tanh (1.6 * band[i] / rms) / std::tanh (1.6 * 3.5));
+            for (auto& v : a)
+                v = juce::jlimit (-0.95f, 0.95f, v);
             return a;
         }
 
@@ -577,7 +614,7 @@ namespace sampler
             const auto noise = r.noise >= 0.0f ? juce::jlimit (0.0f, 1.0f, r.noise) : 0.2f;
             std::vector<float> a ((size_t) kLength, 0.0f);
             for (size_t i = 0; i < a.size(); ++i)
-                a[i] = 0.5f * ((1.0f - noise) * (float) (sum[i] / peak) + noise * uniform (rng, -1.0f, 1.0f));
+                a[i] = 0.95f * ((1.0f - noise) * (float) (sum[i] / peak) + noise * uniform (rng, -1.0f, 1.0f));
             return a;
         }
 
@@ -677,6 +714,190 @@ namespace sampler
             for (auto& v : a)
                 v = juce::jlimit (-0.95f, 0.95f, (float) (v * 0.25 / level));
             return a;
+        }
+
+        /*  Noise through a two pole band pass, a burst at a time. */
+        struct BandPass
+        {
+            double a1 = 0.0, a2 = 0.0, gain = 0.0, x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+
+            BandPass (double hz, double q)
+            {
+                const auto pi = juce::MathConstants<double>::pi;
+                const auto radius = std::exp (-pi * hz / (q * kRate));
+                a1 = 2.0 * radius * std::cos (2.0 * pi * hz / kRate);
+                a2 = radius * radius;
+                gain = (1.0 - a2) * 0.5;
+            }
+
+            double operator() (double x)
+            {
+                const auto y = gain * (x - x2) + a1 * y1 - a2 * y2;
+                x2 = x1; x1 = x; y2 = y1; y1 = y;
+                return y;
+            }
+        };
+
+        std::vector<float> normalisedTo (std::vector<double> v, double peak)
+        {
+            double most = 1.0e-12;
+            for (const auto x : v)
+                most = std::max (most, std::abs (x));
+            std::vector<float> a (v.size());
+            for (size_t i = 0; i < v.size(); ++i)
+                a[i] = (float) (v[i] * peak / most);
+            return a;
+        }
+
+        /*  A kick's beater on the head: a slap of noise a few milliseconds
+            long, rung through a broad resonance between 2 and 5 kHz, with a
+            knock under it where the head gives. Silent after about 30 ms. */
+        std::vector<float> beater (std::mt19937& rng, const Request&)
+        {
+            BandPass slap (uniform (rng, 2000.0f, 5000.0f), uniform (rng, 1.5f, 3.0f));
+            BandPass knock (uniform (rng, 600.0f, 1400.0f), uniform (rng, 2.0f, 4.0f));
+            const auto slapTau = uniform (rng, 0.0015f, 0.004f) * kRate;
+            const auto knockTau = uniform (rng, 0.006f, 0.015f) * kRate;
+            const auto knockShare = (double) uniform (rng, 0.3f, 0.6f);
+            std::vector<double> v ((size_t) kLength, 0.0);
+            for (int i = 0; i < (int) (kRate * 0.12); ++i)
+            {
+                const auto x = (double) uniform (rng, -1.0f, 1.0f);
+                v[(size_t) i] = slap (x) * std::exp (-i / slapTau)
+                                + knockShare * knock (x) * std::exp (-i / knockTau);
+            }
+            return normalisedTo (std::move (v), 0.9);
+        }
+
+        /*  A drum head's overtones, for a tom. An ideal circular membrane rings
+            at 1.59, 2.14, 2.30, 2.65, 2.92, 3.16 and 3.50 times its lowest
+            mode, the higher ones dying faster, and the stick adds a crack of
+            noise. The fundamental is the oscillator's, so it is left out here.
+            Built on middle C and played keytracked, since Vital plays a sample
+            at its own pitch on C4, so these land over whatever note is
+            played. */
+        std::vector<float> drumHead (std::mt19937& rng, const Request&)
+        {
+            static const double modes[] = { 1.594, 2.136, 2.296, 2.653, 2.918, 3.156, 3.501 };
+            const auto base = 261.63;
+            const auto pi = juce::MathConstants<double>::pi;
+            std::vector<double> v ((size_t) kLength, 0.0);
+            int n = 0;
+            for (const auto ratio : modes)
+            {
+                const auto hz = base * ratio * (double) uniform (rng, 0.985f, 1.015f);
+                // The first overtone is kept down: it is the loudest, and at
+                // 1.59, near a minor sixth, it pulled a tom's pitch off the note.
+                const auto amp = (double) uniform (rng, 0.4f, 1.0f) / (1.0 + 0.35 * n) * (n == 0 ? 0.4 : 1.0);
+                const auto tau = (double) uniform (rng, 0.05f, 0.14f) / (1.0 + 0.4 * n) * kRate;
+                const auto phase = (double) uniform (rng, 0.0f, 6.2831853f);
+                for (int i = 0; i < kLength; ++i)
+                    v[(size_t) i] += amp * std::exp (-i / tau) * std::sin (2.0 * pi * hz * i / kRate + phase);
+                ++n;
+            }
+            BandPass crack (uniform (rng, 1500.0f, 4000.0f), 1.2);
+            const auto crackTau = uniform (rng, 0.002f, 0.006f) * kRate;
+            const auto crackShare = (double) uniform (rng, 0.6f, 1.2f);
+            for (int i = 0; i < (int) (kRate * 0.03); ++i)
+                v[(size_t) i] += crackShare * 4.0 * crack (uniform (rng, -1.0f, 1.0f)) * std::exp (-i / crackTau);
+            return normalisedTo (std::move (v), 0.9);
+        }
+
+        /*  A stick on a rim or a wood block: a crack of noise rung through two
+            or three wooden resonances between 900 Hz and 3.2 kHz, gone in a
+            few tens of milliseconds. */
+        std::vector<float> stick (std::mt19937& rng, const Request&)
+        {
+            std::vector<BandPass> wood;
+            const auto count = pick (rng, 2, 3);
+            for (int i = 0; i < count; ++i)
+                wood.emplace_back (uniform (rng, 900.0f, 3200.0f), uniform (rng, 8.0f, 20.0f));
+            BandPass crack (uniform (rng, 3000.0f, 6000.0f), 1.2);
+            const auto tau = uniform (rng, 0.010f, 0.025f) * kRate;
+            const auto crackTau = uniform (rng, 0.0008f, 0.002f) * kRate;
+            std::vector<double> v ((size_t) kLength, 0.0);
+            for (int i = 0; i < (int) (kRate * 0.15); ++i)
+            {
+                const auto x = (double) uniform (rng, -1.0f, 1.0f);
+                // The strike excites the wood for a moment, and the wood rings on.
+                const auto hit = x * std::exp (-i / tau);
+                double ring = 0.0;
+                for (auto& w : wood)
+                    ring += w (hit);
+                v[(size_t) i] = 3.0 * ring + 1.5 * crack (x) * std::exp (-i / crackTau);
+            }
+            return normalisedTo (std::move (v), 0.9);
+        }
+
+        /*  A kettle drum, from orchestral recordings.
+
+            Each mode of the head at its own ratio, level and rate of decay,
+            measured on five timpani from Versilian's VSCO 2 at two dynamics
+            and on the modes a kettle drum is known for: the principal and the
+            fifth above it about equal and ringing longest, the octave and the
+            tenth a little under them, two more above those, and the head's
+            own thud below the principal, loud at the strike and gone in a few
+            hundred milliseconds. Over them the felt, a thud of low passed
+            noise with a brighter edge on a harder strike.
+
+            Built with the principal on C3, 130.81 Hz, three seconds long, to
+            be played keytracked a twelfth up, which is C4, Vital's root. So
+            the preview note plays it at its own speed, and a lower drum rings
+            longer and a higher one shorter, as real ones do.
+        */
+        std::vector<float> kettle (std::mt19937& rng, const Request&)
+        {
+            struct Mode { float ratio, db, decay; };   // decay in dB a second
+            static const Mode modes[] = {
+                { 0.58f, -8.0f, 50.0f }, { 0.64f, -6.0f, 46.0f },     // the thud
+                { 0.70f, -2.0f, 40.0f },
+                { 1.00f,  0.0f, 16.0f }, { 1.50f, -1.0f, 12.0f },     // principal, fifth
+                { 1.98f, -7.0f, 16.0f }, { 2.44f, -11.0f, 22.0f },    // octave, tenth
+                { 2.90f, -15.0f, 28.0f }, { 3.37f, -18.0f, 34.0f },
+                { 2.18f, -18.0f, 38.0f }, { 2.83f, -20.0f, 45.0f },   // off the series
+                { 3.83f, -22.0f, 34.0f }, { 4.32f, -24.0f, 38.0f },
+                { 4.80f, -26.0f, 40.0f },
+            };
+            // How hard the strike is. A harder one brings the upper modes up
+            // with the felt's edge, as the loud recordings did by 6 to 10 dB.
+            const auto edge = (double) uniform (rng, 0.0f, 1.0f);
+            const auto length = kRate * 3;
+            const auto base = 130.81;
+            const auto pi = juce::MathConstants<double>::pi;
+            std::vector<double> v ((size_t) length, 0.0);
+
+            for (const auto& m : modes)
+            {
+                const auto hz = base * m.ratio * (double) uniform (rng, 0.99f, 1.01f);
+                const auto lift = m.ratio > 2.5f ? 8.0 * edge : 0.0;
+                const auto amp = std::pow (10.0, (m.db + lift + uniform (rng, -2.5f, 2.5f)) / 20.0);
+                const auto rate = m.decay * uniform (rng, 0.8f, 1.25f);
+                const auto perSample = std::pow (10.0, -rate / 20.0 / kRate);
+                const auto phase = (double) uniform (rng, 0.0f, 6.2831853f);
+                // A few milliseconds to speak, as a head does under a felt.
+                const auto rise = (int) (kRate * 0.003);
+                double level = amp;
+                for (int i = 0; i < length; ++i)
+                {
+                    const auto onset = i < rise ? (double) i / rise : 1.0;
+                    v[(size_t) i] += onset * level * std::sin (2.0 * pi * hz * i / kRate + phase);
+                    level *= perSample;
+                }
+            }
+
+            // The felt: a low passed thud, with an edge on a harder strike.
+            const auto corner = 900.0 + 1600.0 * edge;
+            const auto pole = std::exp (-2.0 * pi * corner / kRate);
+            const auto tau = (double) uniform (rng, 0.006f, 0.014f) * kRate;
+            const auto felt = 0.5 + 0.7 * edge;
+            double l1 = 0.0, l2 = 0.0;
+            for (int i = 0; i < (int) (kRate * 0.12); ++i)
+            {
+                l1 = (1.0 - pole) * (double) uniform (rng, -1.0f, 1.0f) + pole * l1;
+                l2 = (1.0 - pole) * l1 + pole * l2;
+                v[(size_t) i] += felt * 6.0 * l2 * std::exp (-i / tau);
+            }
+            return normalisedTo (std::move (v), 0.9);
         }
 
         /*  Beads in a shell, the way Perry Cook's PhISEM shakers make them.
@@ -883,6 +1104,10 @@ namespace sampler
         static const Model metal  { "Metal",  &metalCluster,  true,  false, 0.40f, 0.80f, true };
         static const Model beaded { "Beads",  &beads,         true,  false, 0.40f, 0.80f, true };
         static const Model plate  { "Cymbal", &cymbalPlate,   true,  false, 0.40f, 0.80f, true };
+        static const Model slap   { "Beater", &beater,        false, false, 0.20f, 0.40f };
+        static const Model head   { "Head",   &drumHead,      false, true,  0.30f, 0.50f };
+        static const Model wood   { "Stick",  &stick,         false, false, 0.50f, 0.80f };
+        static const Model drum   { "Kettle", &kettle,        false, true,  0.80f, 1.00f };
         static const Model felt   { "Mallet", &mallet,        false, false, 0.20f, 0.45f };
 
         std::vector<const Model*> allowed;
@@ -938,7 +1163,8 @@ namespace sampler
 
         static const Model* const everything[] = { &bed, &struck, &pluck,
                                                    &gritty, &rising, &vocal, &thumped, &noise, &metal,
-                                                   &beaded, &felt, &plate };
+                                                   &beaded, &felt, &plate, &slap, &head, &wood,
+                                                   &drum };
 
         const Model* model = nullptr;
         if (! request.model.empty())

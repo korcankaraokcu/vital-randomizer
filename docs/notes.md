@@ -916,6 +916,33 @@ it. Over it is a felt mallet, a new one shot sample that is a short low passed
 thud, and a room, since a timpani is never heard dry. No tuned drum takes a
 warp now.
 
+That still sounded like a bass, and the references it had been checked against
+were a game's sound effect and two General MIDI style samples, not an orchestra.
+Measured against five timpani from Versilian's VSCO 2 at two dynamics, a free
+orchestral library, the wavetable drum differed in four ways. It had a partial
+an octave below the note at -14 to -18 dB, which the table's harmonics imply
+and a kettle drum does not have. It had none of the head's own thud, the
+cluster at 0.55 to 0.8 times the principal that the recordings show 2 to 13 dB
+under it and dying at 37 to 52 dB a second. All its partials fell together at
+about 20 dB a second, where a real drum's principal and fifth ring on at 6 to 24
+while the rest die fast, so a real hit drops 20 dB in 0.34 to 0.76 seconds and
+then rings, and one steady fall is how a bass note fades. And its strike was
+dull, -25 to -38 dB above 1.5 kHz against -15 to -33.
+
+A wavetable is one cycle with one envelope and can do none of the first three,
+so the timpani is a sample now, Kettle: each mode at its own ratio, level and
+decay, the thud, the principal and fifth about equal, the octave, the tenth and
+the modes above them brighter on a harder strike, and the felt over the top.
+Three seconds of it, built with the principal on C3 and played keytracked a
+twelfth up, which is Vital's root, so the preview note plays it at its own speed
+and a lower drum rings longer, as a real one does. The oscillators are off. The
+shared ranges stopped the sample's transpose at 0, so drums are exempt from that
+as well. Measured the same way it now has no partial below the thud, the thud at
+0.58 to 0.71 dying at 33 to 57 dB a second, a 20 dB drop in 0.62 to 1.02
+seconds and a strike at -16 to -26 dB above 1.5 kHz. Its pitch reads an octave
+under the key, which the four modes imply and which is where a real kettle drum
+is often heard. A timpani preset is about 440 KB, most of it the sample.
+
 **A shaker is played, not struck.** Filtered white noise with a short swell was
 a hiss. A real one is many small collisions, beads or seeds hitting a shell,
 which is how Perry Cook's PhISEM shakers in the Synthesis ToolKit build it: at
@@ -928,6 +955,50 @@ sixteenths or eighths, never dropping below a quarter to two fifths of full
 since the beads never stop. A held key keeps shaking, and a tap is one stroke.
 Measured over a held second, the level rises eight times, 10 to 17 dB between
 stroke and trough.
+
+**Every kind against real samples.** After the cymbals, the rest were measured
+the same way, four sampled drums per kind against four of ours, by octave share
+of the first half second, brightness over time, attack, and pitch and its glide.
+The one finding common to nearly all of them was Vital's multiband compressor,
+on in the percussion archetype. It lifted the quiet low band of every noise kind
+by 20 to 40 dB, a clap at -10 to -18 dB below 125 Hz where real ones sit at -20
+to -66, and it pumped a timpani up for 200 ms after the strike. It had also been
+the only top end a kick or a tom had. Drums have it off now, and the rest
+followed from that:
+
+- A kick has a beater, a new one shot sample, a slap of noise rung between 2 and
+  5 kHz over a knock, and a tom has a head, a new keytracked sample of a
+  membrane's overtones at 1.59 to 3.5 times the note with the stick's crack on
+  top. Vital plays a sample at its own pitch on C4, measured, so a head built on
+  middle C lands over whatever note is played. Both go past the filter to the
+  effects, since the kick's and the tom's low pass had taken them away
+  entirely, and kicks now keep 2 to 8 kHz at -20 to -44 dB where real ones keep
+  -22 to -44, and toms 1 to 4 kHz at -25 to -40 against -18 to -31. The tom's
+  glide narrowed to two to five semitones, since sampled toms fall two or
+  three, and without the compressor holding up the settled tail a bigger one
+  read sharp.
+- A drum's body level is held as heard, as its cutoff is. Velocity on the body
+  added 0.26 to a snare meant to be mostly rattle, nine tenths of it under 400
+  Hz, and COMPLEX's third oscillator could be four times a rim's body, which
+  made the rim a tone. With both held, the snare's octave profile nearly
+  overlays a sampled one.
+- A rim is mostly a new Stick sample, a crack rung through two or three wooden
+  resonances, where it had been a clean 523 Hz tone.
+- A cowbell sits lower in its band pass, since sampled ones are 13 to 29 dB
+  down by 2 kHz.
+- The EQ on a drum is held within 3 dB, and on the kinds that live above a
+  kilohertz it may not cut the top or lift the bottom. BRIGHT's EQ lever had
+  cut a clap's highs by 6 dB and lifted its lows by 7.
+
+Without the compressor the noise kinds were also up to 17 dB quieter than the
+master volume could make up, and the clap took 876 rejections to fill sixteen.
+The noise and metal samples are written near full scale now, where they were at
+half, their levels sit higher on the knob, and the clap's noise is kept to its
+band and gently saturated, which is still heard as noise and plays several
+decibels louder at the same peak. A full screen of all twelve kinds passes 192
+of 192 with a handful of level retries. The shaker's troughs deepened by 6 dB
+without the compressor filling them, so the level between strokes rose to keep
+it as it was.
 
 **Named for what it is.** A roll's name carries its kind, so a batch file reads
 Percussion_04_Crash rather than Percussion_04, and the parts in Vital's panels

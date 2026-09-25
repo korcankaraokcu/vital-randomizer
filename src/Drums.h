@@ -55,7 +55,14 @@ namespace drums
         const char* sample = "";
         Band sampleLevel;
         Band metalNoise;                          // noise mixed into a metal sample
-        Band metalCorner;                         // where a metal sample's tilt turns, Hz
+        /*  Where the sample goes: filter one, or 3, past the filters to the
+            effects. A kick's and a tom's filter is a low pass a few hundred
+            hertz up, and it took the beater and the stick away entirely. */
+        int sampleDestination = 0;
+        // Semitones the sample is played at, for one built an octave down.
+        float sampleTranspose = 0.0f;
+        Band metalCorner;                         // where a metal sample's tilt turns,
+                                                  // or a noise sample's band sits, Hz
         int metalBanks = 1;                       // sets of six squares in it
         int modes = 0;                            // resonances in a cymbal sample
         Band modeQ;                               // and how sharp they are

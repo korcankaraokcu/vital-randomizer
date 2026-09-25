@@ -1143,6 +1143,9 @@ namespace gen
             for (const auto* dest : { "osc_1_destination", "osc_2_destination",
                                       "osc_3_destination", "sample_destination" })
                 settings[dest] = 0.0;
+            settings["sample_destination"] = (double) kind->sampleDestination;
+            if (kind->sampleTranspose != 0.0f)
+                settings["sample_transpose"] = (double) kind->sampleTranspose;
 
             const auto layered = *kind->sample != '\0';
             settings["sample_on"] = layered ? 1.0 : 0.0;
@@ -1166,8 +1169,31 @@ namespace gen
         if (oscFree && *kind->sample != '\0')
             hold ("sample_level", kind->sampleLevel);
 
-        if (fresh && oscFree && kind->body.high > 0.0f)
-            hold ("osc_1_level", kind->body);
+        /*  The body level heard at a normal strike, as with the cutoff below.
+            Velocity on the body's level adds to it for the whole note, and on
+            a snare meant to be mostly rattle it took a body set at 0.16 to
+            0.42, nine tenths of the hit under 400 Hz. So the band holds what
+            the two add up to, velocity keeping a third of it. And COMPLEX's
+            third oscillator, which thickens the body, may not be louder than
+            the body: on one rim it was four times it, and the rim was a tone.
+        */
+        if (fresh && oscFree && modFree && kind->body.high > 0.0f)
+        {
+            const auto heard = draw ("osc_1_level", kind->body);
+            double viaVelocity = 0.0;
+            for (size_t i = 0; i < settings["modulations"].size(); ++i)
+                if (modSource (settings["modulations"][i]) == "velocity"
+                    && modDest (settings["modulations"][i]) == "osc_1_level")
+                {
+                    const auto amount = heard / 3.0 / (110.0 / 127.0);
+                    settings["modulation_" + std::to_string (i + 1) + "_amount"] = amount;
+                    settings["modulation_" + std::to_string (i + 1) + "_bipolar"] = 0.0;
+                    viaVelocity = heard / 3.0;
+                }
+            settings["osc_1_level"] = heard - viaVelocity;
+            if (settings.value ("osc_3_on", 0.0) >= 0.5)
+                settings["osc_3_level"] = juce::jmin (settings.value ("osc_3_level", 0.0), (double) heard);
+        }
 
         // How far the second envelope throws the filter open at the strike.
         auto& mods = settings["modulations"];
@@ -1271,6 +1297,25 @@ namespace gen
             }
         }
 
+        /*  A gentle EQ only. BRIGHT's EQ lever is its most reliable one on a
+            held patch, but a drum's brightness is its kind's, held on the
+            filter, and on one clap it cut the highs by 6 dB and lifted the lows
+            by 7, taking away the band the clap lives in and 12 dB of level the
+            master volume could not give back. */
+        if (r.locks.count (schema::Section::fx) == 0)
+        {
+            // And on a drum that lives above a kilohertz, none that takes
+            // from the top or adds to the bottom.
+            const auto high = kind->brightness.low >= 1000.0f;
+            const std::pair<const char*, std::pair<double, double>> limits[] = {
+                { "eq_low_gain", { -3.0, high ? 0.0 : 3.0 } },
+                { "eq_band_gain", { -3.0, 3.0 } },
+                { "eq_high_gain", { high ? 0.0 : -3.0, 3.0 } } };
+            for (const auto& [gain, range] : limits)
+                if (settings.contains (gain) && settings[gain].is_number())
+                    settings[gain] = juce::jlimit (range.first, range.second, settings[gain].get<double>());
+        }
+
         if (fresh && kind->room && r.locks.count (schema::Section::fx) == 0)
         {
             settings["reverb_on"] = 1.0;
@@ -1347,7 +1392,7 @@ namespace gen
         {
             const auto second = draw ("shake_second", { 0.60f, 0.85f });  // how heavy the ka is
             const auto swell = draw ("shake_swell", { 0.08f, 0.16f });    // how long a stroke takes to come in
-            const auto rest = draw ("shake_rest", { 0.25f, 0.40f });      // the beads never stop
+            const auto rest = draw ("shake_rest", { 0.40f, 0.55f });      // the beads never stop
 
             // Strength of the stroke at x, 1 at its peak.
             const std::vector<std::pair<float, float>> strokes = {
@@ -2224,10 +2269,11 @@ namespace gen
         {
             if (! it.value().is_number())
                 continue;
-            // A drum's own bands hold these, and a hat's cutoff and a high
-            // pass's blend both sit above the shared ceiling.
+            // A drum's own bands hold these, and a hat's cutoff, a high pass's
+            // blend and a timpani played a twelfth up all sit above the shared
+            // ceiling.
             if (drum != nullptr && (it.key() == "sample_level" || it.key() == "filter_1_cutoff"
-                                    || it.key() == "filter_1_blend"))
+                                    || it.key() == "filter_1_blend" || it.key() == "sample_transpose"))
                 continue;
             float low = 0.0f, high = 0.0f;
             if (! archetype::rangeFor (it.key(), low, high))
