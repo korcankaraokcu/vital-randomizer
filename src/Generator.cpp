@@ -483,6 +483,9 @@ namespace gen
             if (k->metalCorner.high > 0.0f)
                 sr.corner = k->metalCorner.low + uniform (rng) * (k->metalCorner.high - k->metalCorner.low);
             sr.banks = k->metalBanks;
+            sr.modes = k->modes;
+            if (k->modeQ.high > 0.0f)
+                sr.q = k->modeQ.low + uniform (rng) * (k->modeQ.high - k->modeQ.low);
         }
 
         auto built = sampler::create (rng, sr);
@@ -1261,6 +1264,11 @@ namespace gen
                 hold ("env_1_sustain", kind->sustain);
             else
                 settings["env_1_sustain"] = 0.0;
+            if (kind->sweepDecay.high > 0.0f)
+            {
+                hold ("env_2_decay", kind->sweepDecay);
+                settings["env_2_sustain"] = 0.0;
+            }
         }
 
         if (fresh && kind->room && r.locks.count (schema::Section::fx) == 0)
@@ -2216,7 +2224,10 @@ namespace gen
         {
             if (! it.value().is_number())
                 continue;
-            if (drum != nullptr && (it.key() == "sample_level" || it.key() == "filter_1_cutoff"))
+            // A drum's own bands hold these, and a hat's cutoff and a high
+            // pass's blend both sit above the shared ceiling.
+            if (drum != nullptr && (it.key() == "sample_level" || it.key() == "filter_1_cutoff"
+                                    || it.key() == "filter_1_blend"))
                 continue;
             float low = 0.0f, high = 0.0f;
             if (! archetype::rangeFor (it.key(), low, high))

@@ -70,8 +70,9 @@ Then rescan plugins in your DAW.
   cowbell, rim and shaker. It starts on **Random drum**, which is any of them,
   and **+** and **-** work as they do for scales. The tuned ones, the kick, the
   toms, the timpani and the cowbell, follow the keyboard, so playing a
-  different note tunes the drum. Hats and cymbals are built on an 808 style
-  metal sample with the oscillators off. The shaker keeps shaking in time
+  different note tunes the drum. Hats are built on an 808 style metal
+  sample and crashes and rides on a resonant plate sample that darkens as
+  it rings, all with the oscillators off. The shaker keeps shaking in time
   with the song for as long as the key is held. A drum's name says which kind it is,
   and its LFOs are named for what they move.
 - **EXPORT** writes the current patch to a `.vital` file.

@@ -862,19 +862,46 @@ like that. The 808 sums six square waves at 205.3, 304.4, 369.6, 522.7, 540 and
 That cluster is now a sample model of its own, Metal: the six moved together and
 a little apart per seed, each rounded to whole hertz so the one second loop is
 seamless, band limited, tilted up the way the 808's band passes tilt it, and
-mixed with noise, little for a hat and a lot for a crash's wash. The four kinds
-run on it with every oscillator off, and the decays follow the 808's, a closed
-hat in about 50 ms, an open one between 90 and 600, a crash up to two seconds.
-Salience fell to between 0.05 and 0.5, the ride the highest, which suits a
-cymbal played for its ping. The tilt was needed: without it the squares'
-fundamentals were the loudest thing in the sample and a ride had a fifth of its
-energy under 400 Hz.
+mixed with noise. The hats, and at first the crash and ride, ran on it with
+every oscillator off, and the decays follow the 808's, a closed hat in about
+50 ms, an open one between 90 and 600. Salience fell to between 0.05 and 0.5.
+The tilt was needed: without it the squares' fundamentals were the loudest
+thing in the sample and a ride had a fifth of its energy under 400 Hz.
 
 The open hat needed more than that. Ringing for up to half a second it let the
 six squares be picked out one by one, which is heard as a struck chord rather
 than a hat. It gets a second bank of six at an unrelated ratio above the first,
 a tilt turning at 5 to 7 kHz instead of 2.5, more noise and no resonance, and
 its salience fell from about 0.27 to 0.06.
+
+**The crash and ride are plates, not clusters.** On the metal they still sounded
+off, so they were measured against sampled crashes and rides, level matched and
+from the onset. Three things separated them. The ride was a chord: eighty
+spectral lines standing 30 dB clear of the floor, where real rides show twenty
+or thirty standing 11 to 19 dB clear. Neither darkened as it rang, where a real
+crash's spectral centre falls from about 10 kHz at the strike to 5 by two
+seconds and a ride's from 7 to under 3, since a plate's high modes die first.
+And both had a rumble real ones lack, 125 Hz at -15 to -24 dB of the body where
+real cymbals sit at -30 to -64.
+
+The rumble had two causes, and neither was the sample, which measured -48 dB
+there on its own. The shared ranges stop Vital's filter blend at 1, band pass,
+so every kind written as a high pass had been a band pass all along. Drums are
+exempt now, and the kinds that already sounded right, the hats, clap, cowbell,
+rim and shaker, are written as the band pass they were. And Vital's compressor
+is multiband: on a cymbal it lifted the quiet low band by 26 dB and held the
+tail up twice as long as a real one rings. Crash and ride have it off.
+
+They run on a new sample model, Cymbal: white noise rung through two pole
+resonators spread from 500 Hz to 16 kHz, crowding toward the top and weighted
+toward the 3 to 9 kHz a cymbal lives in, over noise high passed at 2 kHz. A
+crash has two hundred broad ones and some wash, a ride ninety sharp ones and
+little. Over it a low pass the second envelope throws open by 20 to 32
+semitones at the strike and closes over the ring. Measured the same way, the
+rides now show 6 to 27 lines standing 10 to 16 dB clear and darken from 6 kHz to
+3 or 4, the crashes from 8.6 to 5, and both sit at -33 to -42 dB at 125 Hz.
+The crashes are at the washy end of the real ones, peaks 4 to 7 dB clear against
+6 to 11.
 
 **A timpani is not a sine.** It was a bare fundamental under a low pass, which
 is a bass, and one roll had a formant warp from COMPLEX over heavy distortion

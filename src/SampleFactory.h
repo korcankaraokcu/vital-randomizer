@@ -46,6 +46,8 @@ namespace sampler
         float noise = -1.0f;
         float corner = -1.0f;       // where a metal cluster's tilt turns, Hz
         int banks = 1;              // sets of six squares in a metal cluster
+        int modes = 0;              // resonances in a cymbal
+        float q = -1.0f;            // how sharp they are
     };
 
     struct Result

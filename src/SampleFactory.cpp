@@ -581,6 +581,104 @@ namespace sampler
             return a;
         }
 
+        /*  A cymbal's plate: noise rung through a bank of resonances.
+
+            A cymbal has thousands of modes, crowding closer together the
+            higher they go, each ringing for a while and each slightly
+            different from strike to strike. That is heard as a wash with some
+            ringing in it, which sampled crashes and rides show as a spectrum
+            with twenty or thirty peaks standing 10 to 20 dB clear of a noisy
+            floor. A cluster of square waves is the other way round: a few
+            hundred exact lines on almost no floor.
+
+            So white noise is rung through a few dozen to a couple of hundred
+            two pole resonators, spread from 500 Hz to 16 kHz and crowding
+            toward the top, weighted toward the 3 to 9 kHz a cymbal lives in,
+            and mixed with noise high passed at 2 kHz. The resonances' sharpness
+            decides between wash and ping. The loop is crossfaded on equal power
+            into its own start, as the noise beds are, since a ringing
+            resonance is not silent at the seam.
+        */
+        std::vector<float> cymbalPlate (std::mt19937& rng, const Request& r)
+        {
+            const auto modes = r.modes > 0 ? r.modes : 120;
+            const auto q = r.q > 0.0f ? (double) r.q : 40.0;
+            const auto fade = (int) (kRate * 0.05);
+            const auto total = kLength + fade;
+            const auto pi = juce::MathConstants<double>::pi;
+
+            std::vector<double> input ((size_t) (total + kRate / 4));
+            for (auto& v : input)
+                v = (double) uniform (rng, -1.0f, 1.0f);
+            const auto warm = (int) input.size() - total;   // settle the resonators first
+
+            std::vector<double> ring ((size_t) total, 0.0);
+            for (int m = 0; m < modes; ++m)
+            {
+                const auto u = (double) uniform (rng);
+                const auto hz = 500.0 * std::pow (32.0, std::pow (u, 0.75));
+                const auto sharp = q * (double) uniform (rng, 0.6f, 1.4f);
+                const auto radius = std::exp (-pi * hz / (sharp * kRate));
+                const auto a1 = 2.0 * radius * std::cos (2.0 * pi * hz / kRate);
+                const auto a2 = radius * radius;
+                const auto gain = (1.0 - a2) * 0.5;
+                const auto lift = (hz / 3000.0) * (hz / 3000.0);
+                const auto weight = lift / (1.0 + lift) / (1.0 + (hz / 11000.0) * (hz / 11000.0))
+                                    * (double) uniform (rng, 0.3f, 1.0f);
+                double y1 = 0.0, y2 = 0.0;
+                for (int i = 2; i < (int) input.size(); ++i)
+                {
+                    const auto y = gain * (input[(size_t) i] - input[(size_t) i - 2]) + a1 * y1 - a2 * y2;
+                    y2 = y1; y1 = y;
+                    if (i >= warm)
+                        ring[(size_t) (i - warm)] += weight * y;
+                }
+            }
+
+            // The wash under the ringing: noise with its lows taken off.
+            std::vector<double> hiss ((size_t) total, 0.0);
+            const auto pole = std::exp (-2.0 * pi * 2000.0 / kRate);
+            double lo1 = 0.0, lo2 = 0.0;
+            for (int i = 0; i < (int) input.size(); ++i)
+            {
+                const auto x = (double) uniform (rng, -1.0f, 1.0f);
+                lo1 = (1.0 - pole) * x + pole * lo1;
+                lo2 = (1.0 - pole) * lo1 + pole * lo2;
+                if (i >= warm)
+                    hiss[(size_t) (i - warm)] = x - lo2;
+            }
+
+            const auto rmsOf = [] (const std::vector<double>& v)
+            {
+                double p = 0.0;
+                for (const auto x : v)
+                    p += x * x;
+                return std::sqrt (p / (double) v.size()) + 1.0e-12;
+            };
+            const auto noise = r.noise >= 0.0f ? (double) juce::jlimit (0.0f, 1.0f, r.noise) : 0.3;
+            const auto ringGain = (1.0 - noise) / rmsOf (ring), hissGain = noise / rmsOf (hiss);
+
+            std::vector<double> mixed ((size_t) total);
+            for (size_t i = 0; i < mixed.size(); ++i)
+                mixed[i] = ringGain * ring[i] + hissGain * hiss[i];
+
+            std::vector<float> a ((size_t) kLength);
+            for (int i = 0; i < kLength; ++i)
+            {
+                auto v = mixed[(size_t) i];
+                if (i < fade)
+                {
+                    const auto t = (double) i / fade;
+                    v = std::sqrt (t) * v + std::sqrt (1.0 - t) * mixed[(size_t) (kLength + i)];
+                }
+                a[(size_t) i] = (float) v;
+            }
+            const auto level = rmsOf (std::vector<double> (a.begin(), a.end()));
+            for (auto& v : a)
+                v = juce::jlimit (-0.95f, 0.95f, (float) (v * 0.25 / level));
+            return a;
+        }
+
         /*  Beads in a shell, the way Perry Cook's PhISEM shakers make them.
 
             A shaker's sound is many small collisions at random, each a burst
@@ -784,6 +882,7 @@ namespace sampler
         static const Model noise  { "Noise",  &whiteNoise,    true,  false, 0.30f, 0.70f, true };
         static const Model metal  { "Metal",  &metalCluster,  true,  false, 0.40f, 0.80f, true };
         static const Model beaded { "Beads",  &beads,         true,  false, 0.40f, 0.80f, true };
+        static const Model plate  { "Cymbal", &cymbalPlate,   true,  false, 0.40f, 0.80f, true };
         static const Model felt   { "Mallet", &mallet,        false, false, 0.20f, 0.45f };
 
         std::vector<const Model*> allowed;
@@ -839,7 +938,7 @@ namespace sampler
 
         static const Model* const everything[] = { &bed, &struck, &pluck,
                                                    &gritty, &rising, &vocal, &thumped, &noise, &metal,
-                                                   &beaded, &felt };
+                                                   &beaded, &felt, &plate };
 
         const Model* model = nullptr;
         if (! request.model.empty())

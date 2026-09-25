@@ -57,11 +57,17 @@ namespace drums
         Band metalNoise;                          // noise mixed into a metal sample
         Band metalCorner;                         // where a metal sample's tilt turns, Hz
         int metalBanks = 1;                       // sets of six squares in it
+        int modes = 0;                            // resonances in a cymbal sample
+        Band modeQ;                               // and how sharp they are
 
         // The amplitude envelope, in Vital's units. Sustain is zero unless given.
         Band attack, decay, release, sustain;
 
         // Filter one, which shapes the whole hit.
+        /*  Vital's blend runs 0 to 2: low pass, band pass, high pass. The
+            shared ranges stop it at 1, and until drums were exempt every kind
+            written above 1 was a band pass. The ones that sounded right that
+            way are written as what they were. */
         Band blend;
         /*  The cutoff heard at a normal strike, with the macros where they sit.
             Velocity and a macro on the cutoff both add to it for as long as
@@ -70,6 +76,9 @@ namespace drums
         Band cutoff;
         // How far the second envelope opens the filter at the strike, semitones.
         Band sweep;
+        // How long the second envelope takes to close it again, when a kind
+        // wants that to be heard. Otherwise it is left where it is.
+        Band sweepDecay;
         float maxResonance = 0.3f;
         bool secondFilter = true;                 // whether filter two may stay
 

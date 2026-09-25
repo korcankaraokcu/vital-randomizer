@@ -71,7 +71,7 @@ namespace drums
                 k.tonal = false;
                 k.sample = "Noise"; k.sampleLevel = { 0.60f, 0.80f };
                 k.attack = { 0.0f, 0.02f }; k.decay = { 0.72f, 0.85f }; k.release = { 0.20f, 0.30f };
-                k.blend = { 0.9f, 1.1f }; k.cutoff = { 86.0f, 96.0f }; k.maxResonance = 0.3f;
+                k.blend = { 0.9f, 1.0f }; k.cutoff = { 86.0f, 96.0f }; k.maxResonance = 0.3f;
                 k.sweep = { 0.0f, 4.0f };
                 k.secondFilter = false; k.flam = true;
                 // White noise through Vital's gentle band pass keeps plenty of
@@ -90,7 +90,7 @@ namespace drums
                 k.tonal = false;
                 k.sample = "Metal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.05f, 0.25f };
                 k.attack = { 0.0f, 0.01f }; k.decay = { 0.47f, 0.56f }; k.release = { 0.08f, 0.15f };
-                k.blend = { 1.8f, 2.0f }; k.cutoff = { 112.0f, 124.0f }; k.maxResonance = 0.25f;
+                k.blend = { 1.0f, 1.0f }; k.cutoff = { 112.0f, 124.0f }; k.maxResonance = 0.25f;
                 k.sweep = { 0.0f, 6.0f };
                 k.secondFilter = false;
                 k.brightness = { 3500.0f, 16000.0f }; k.maxHeld = 0.25f;
@@ -109,35 +109,53 @@ namespace drums
                 k.sample = "Metal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.35f, 0.55f };
                 k.metalCorner = { 5000.0f, 7000.0f }; k.metalBanks = 2;
                 k.attack = { 0.0f, 0.01f }; k.decay = { 0.66f, 0.92f }; k.release = { 0.25f, 0.45f };
-                k.blend = { 1.8f, 2.0f }; k.cutoff = { 114.0f, 124.0f }; k.maxResonance = 0.08f;
+                k.blend = { 1.0f, 1.0f }; k.cutoff = { 114.0f, 124.0f }; k.maxResonance = 0.08f;
                 k.sweep = { 0.0f, 6.0f };
                 k.secondFilter = false;
                 k.brightness = { 3500.0f, 16000.0f }; k.maxHeld = 0.45f;
                 list.push_back (k);
             }
-            {   /*  Crash. The cluster with a lot of noise mixed in for the wash,
-                    under a lower high pass, ringing for up to two seconds. */
+            {   /*  Crash. A real crash is a plate with thousands of modes, dense
+                enough above a few kilohertz to be close to noise, and the high
+                ones die first, so it darkens as it rings: measured on sampled
+                crashes, the centre of the spectrum falls from about 10 kHz at
+                the strike to 5 by two seconds, with next to nothing under 250
+                Hz. Six squares, however much noise is laid over them, are a
+                few hundred exact harmonic lines at one brightness. So it is
+                the Cymbal sample, noise rung through a couple of hundred broad
+                resonances, under a low pass the second envelope throws open at
+                the strike and closes over the ring. And no compressor: Vital's
+                is multiband, and on a cymbal it lifted the quiet low band by
+                26 dB into a rumble and held the tail up twice as long as a real
+                one rings. */
                 Kind k { "Crash" };
-                k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.22 } });
+                k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.22 },
+                                       { "compressor_on", 0.0 } });
                 k.tonal = false;
-                k.sample = "Metal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.30f, 0.55f };
-                k.attack = { 0.0f, 0.02f }; k.decay = { 1.05f, 1.35f }; k.release = { 0.80f, 1.20f };
-                k.blend = { 1.6f, 2.0f }; k.cutoff = { 100.0f, 112.0f }; k.maxResonance = 0.2f;
-                k.sweep = { 0.0f, 8.0f };
+                k.sample = "Cymbal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.10f, 0.25f };
+                k.modes = 200; k.modeQ = { 35.0f, 80.0f };
+                k.attack = { 0.0f, 0.02f }; k.decay = { 1.25f, 1.45f }; k.release = { 0.80f, 1.20f };
+                k.blend = { 0.0f, 0.1f }; k.cutoff = { 106.0f, 116.0f }; k.maxResonance = 0.1f;
+                k.sweep = { 22.0f, 32.0f }; k.sweepDecay = { 1.10f, 1.25f };
                 k.secondFilter = false;
                 k.brightness = { 2500.0f, 14000.0f }; k.maxHeld = 0.95f;
                 list.push_back (k);
             }
-            {   /*  Ride. The cluster almost clean, under a band pass near the
-                    808's 3440 Hz, so its metal pings rather than washes, ringing
-                    for one to two seconds. */
+            {   /*  Ride. The same kind of plate played for its ping, so fewer,
+                sharper resonances and less wash than a crash: sampled rides
+                showed twenty or thirty spectral lines standing 11 to 19 dB
+                clear of the rest, where the six square cluster stood eighty
+                lines 30 dB clear, which is a chord rather than a cymbal. It
+                darkens as it rings as well, from about 7 kHz to under 3. */
                 Kind k { "Ride" };
-                k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.15 } });
+                k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.15 },
+                                       { "compressor_on", 0.0 } });
                 k.tonal = false;
-                k.sample = "Metal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.02f, 0.12f };
+                k.sample = "Cymbal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.05f, 0.15f };
+                k.modes = 90; k.modeQ = { 110.0f, 240.0f };
                 k.attack = { 0.0f, 0.02f }; k.decay = { 1.10f, 1.30f }; k.release = { 0.60f, 0.90f };
-                k.blend = { 1.1f, 1.5f }; k.cutoff = { 100.0f, 110.0f }; k.maxResonance = 0.3f;
-                k.sweep = { 0.0f, 8.0f };
+                k.blend = { 0.0f, 0.2f }; k.cutoff = { 100.0f, 110.0f }; k.maxResonance = 0.15f;
+                k.sweep = { 20.0f, 30.0f }; k.sweepDecay = { 1.00f, 1.20f };
                 k.secondFilter = false;
                 k.brightness = { 2000.0f, 12000.0f }; k.maxHeld = 0.9f;
                 list.push_back (k);
@@ -194,7 +212,7 @@ namespace drums
                                        { "reverb_dry_wet", 0.08 } });
                 k.character = "square"; k.transpose = 24.0f; k.secondTranspose = 31.0f;
                 k.attack = { 0.0f, 0.02f }; k.decay = { 0.68f, 0.80f }; k.release = { 0.15f, 0.25f };
-                k.blend = { 0.9f, 1.1f }; k.cutoff = { 90.0f, 100.0f }; k.maxResonance = 0.35f;
+                k.blend = { 0.9f, 1.0f }; k.cutoff = { 90.0f, 100.0f }; k.maxResonance = 0.35f;
                 k.sweep = { 0.0f, 6.0f };
                 k.secondFilter = false;
                 k.brightness = { 500.0f, 4000.0f }; k.maxHeld = 0.35f; k.pitched = true;
@@ -208,7 +226,7 @@ namespace drums
                 k.character = "fundamental"; k.inharmonic = { 0.1f, 0.4f }; k.transpose = 24.0f;
                 k.sample = "Struck"; k.sampleLevel = { 0.08f, 0.18f };
                 k.attack = { 0.0f, 0.01f }; k.decay = { 0.45f, 0.58f }; k.release = { 0.05f, 0.15f };
-                k.blend = { 1.0f, 1.4f }; k.cutoff = { 92.0f, 104.0f }; k.maxResonance = 0.35f;
+                k.blend = { 1.0f, 1.0f }; k.cutoff = { 92.0f, 104.0f }; k.maxResonance = 0.35f;
                 k.sweep = { 0.0f, 8.0f };
                 k.secondFilter = false;
                 k.brightness = { 600.0f, 6000.0f }; k.maxHeld = 0.2f;
@@ -230,7 +248,7 @@ namespace drums
                 k.sample = "Beads"; k.sampleLevel = { 0.60f, 0.80f };
                 k.attack = { 0.10f, 0.20f }; k.decay = { 0.60f, 0.75f }; k.release = { 0.20f, 0.30f };
                 k.sustain = { 0.80f, 0.95f };
-                k.blend = { 1.4f, 1.8f }; k.cutoff = { 104.0f, 114.0f }; k.maxResonance = 0.15f;
+                k.blend = { 1.0f, 1.0f }; k.cutoff = { 104.0f, 114.0f }; k.maxResonance = 0.15f;
                 k.sweep = { 0.0f, 2.0f };
                 k.secondFilter = false;
                 k.shake = true;
