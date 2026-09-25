@@ -33,6 +33,8 @@ namespace gen
     {
         std::string style;
         std::unordered_map<std::string, float> sliders;   // axis key -> 0..1
+        /*  One for a fresh roll. On VARY it is the depth, which scales both how
+            likely each parameter is to move and how far it goes. */
         float amount = 1.0f;
         /*  How far a roll may wander from the complexity it was handed. One is
             the normal spread that keeps a batch from sounding uniform. Zero
@@ -41,6 +43,9 @@ namespace gen
         float complexityWobble = 1.0f;
         std::set<schema::Section> locks;
         const nlohmann::json* base = nullptr;             // VARY starts from this
+        /*  On VARY, the sections whose settings may move. The LFO rates and the
+            modulation depths move as well, in varyMotion, unless their own
+            sections are locked. */
         std::set<schema::Section> varySections;
         unsigned int seed = 0;                            // 0 picks one
         /*  Which scale a sequence walks. Negative picks one, which is what
@@ -64,6 +69,11 @@ namespace gen
         std::array<std::string, kMacros> macroNames {};
         std::array<std::string, kMacros> macroDests {};
         int routings = 0;
+        /*  How far the roll was allowed to move, 1 for a fresh one and the
+            depth for a VARY. Reported so history records the depth that was
+            actually used rather than whatever the slider says by the time the
+            result lands. */
+        float amount = 1.0f;
         /*  The scale a sequence ended up walking, as an index into
             sequenceScales(). Reported rather than assumed, because a request
             that asked for a random scale has no other way of saying which one
@@ -108,6 +118,8 @@ namespace gen
         void carrySequenceToEveryVoice (nlohmann::json& settings,
                                         const std::string& driver, float depth);
         void scaleModulationDepth (const Request& r, nlohmann::json& settings);
+        /** On VARY, move the LFO rates and the modulation depths by the depth. */
+        void varyMotion (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Give oscillators a warp type, more often the higher COMPLEX is. */
         void chooseWarp (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Switch the distortion on or off from DIRT, before the wiring. */

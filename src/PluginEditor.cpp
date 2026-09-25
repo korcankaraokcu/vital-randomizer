@@ -254,7 +254,10 @@ VitalRandomizerEditor::VitalRandomizerEditor (VitalRandomizerProcessor& p)
         b.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     };
     styleButton (rollButton, kAccent);
-    styleButton (varyButton, kAccent.withAlpha (0.6f));
+    // The same colour as ROLL. The default look halves a disabled button's
+    // opacity, which is the only time VARY should look darker, since before
+    // anything has been rolled there is nothing to vary.
+    styleButton (varyButton, kAccent);
     for (auto* b : { &prevButton, &nextButton, &starButton, &exportButton, &settingsButton })
     {
         b->setColour (juce::TextButton::buttonColourId, kPanel);
@@ -277,12 +280,26 @@ VitalRandomizerEditor::VitalRandomizerEditor (VitalRandomizerProcessor& p)
     varyDepth.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     varyDepth.setRange (0.02, 1.0, 0.01);
     varyDepth.setValue (proc.varyAmount(), juce::dontSendNotification);
-    varyDepth.setColour (juce::Slider::thumbColourId, kAccentWarm);
-    varyDepth.setColour (juce::Slider::trackColourId, kAccentWarm.withAlpha (0.4f));
+    /*  VARY's depth, drawn as part of VARY.
+
+        It used to be a bare bar in the warm accent, which is the colour of the
+        locks and the kept patches, so it read as belonging to them and nothing
+        said what it did. It takes the button's colour now, the two share an
+        outline, and the button carries the depth in its own name, so dragging
+        the bar visibly changes VARY.
+    */
+    varyDepth.setColour (juce::Slider::thumbColourId, kAccent.withAlpha (0.8f));
+    varyDepth.setColour (juce::Slider::trackColourId, kAccent.withAlpha (0.35f));
     varyDepth.setColour (juce::Slider::backgroundColourId, kBack);
-    varyDepth.setTooltip ("How far VARY drifts from the current patch");
-    varyDepth.onValueChange = [this] { proc.setVaryAmount ((float) varyDepth.getValue()); };
+    varyDepth.setTooltip ("How far VARY moves the current patch");
+    varyButton.setTooltip ("Move the current patch rather than replace it. The bar beside it sets how far.");
+    varyDepth.onValueChange = [this]
+    {
+        proc.setVaryAmount ((float) varyDepth.getValue());
+        updateVaryLabel();
+    };
     addAndMakeVisible (varyDepth);
+    updateVaryLabel();
 
     filmstrip.onSelect = [this] (int index)
     {
@@ -497,6 +514,12 @@ void VitalRandomizerEditor::refreshFromProcessor()
     const auto ready = s.vitalReady && ! s.working;
     rollButton.setEnabled (ready);
     varyButton.setEnabled (ready && ! proc.candidates().empty());
+    // A project reload sets the depth underneath the editor.
+    if (std::abs (varyDepth.getValue() - proc.varyAmount()) > 1.0e-4)
+    {
+        varyDepth.setValue (proc.varyAmount(), juce::dontSendNotification);
+        updateVaryLabel();
+    }
     starButton.setEnabled (ready && ! proc.candidates().empty());
     exportButton.setEnabled (s.vitalReady);
 
@@ -590,6 +613,11 @@ void VitalRandomizerEditor::exportCurrent()
     });
 }
 
+void VitalRandomizerEditor::updateVaryLabel()
+{
+    varyButton.setButtonText ("VARY " + juce::String (juce::roundToInt (varyDepth.getValue() * 100.0)) + "%");
+}
+
 void VitalRandomizerEditor::paint (juce::Graphics& g)
 {
     g.fillAll (kBack);
@@ -597,6 +625,11 @@ void VitalRandomizerEditor::paint (juce::Graphics& g)
     g.fillRect (0, 0, getWidth(), stripHeight());
     g.setColour (juce::Colours::black.withAlpha (0.5f));
     g.drawHorizontalLine (stripHeight() - 1, 0.0f, (float) getWidth());
+
+    // One outline around VARY and its depth, so they read as one control.
+    const auto vary = varyButton.getBounds().getUnion (varyDepth.getBounds()).expanded (3, 3);
+    g.setColour (kAccent.withAlpha (0.35f));
+    g.drawRoundedRectangle (vary.toFloat(), 4.0f, 1.0f);
 
     if (vitalEditor == nullptr)
     {
@@ -644,8 +677,10 @@ void VitalRandomizerEditor::resized()
     midRow.removeFromLeft (10);
 
     rollButton.setBounds (midRow.removeFromLeft (74).reduced (2, 0));
-    varyButton.setBounds (midRow.removeFromLeft (66).reduced (2, 0));
-    varyDepth.setBounds (midRow.removeFromLeft (86).reduced (4, 4));
+    midRow.removeFromLeft (4);
+    varyButton.setBounds (midRow.removeFromLeft (84).reduced (2, 0));
+    varyDepth.setBounds (midRow.removeFromLeft (76).reduced (4, 4));
+    midRow.removeFromLeft (4);
     midRow.removeFromLeft (10);
     prevButton.setBounds (midRow.removeFromLeft (30).reduced (2, 0));
     nextButton.setBounds (midRow.removeFromLeft (30).reduced (2, 0));

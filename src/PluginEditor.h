@@ -76,6 +76,8 @@ private:
     void attachVitalEditor();
     void showSettingsMenu();
     void exportCurrent();
+    /** Show VARY's depth on the button itself, so the two read as one control. */
+    void updateVaryLabel();
 
     VitalRandomizerProcessor& proc;
 

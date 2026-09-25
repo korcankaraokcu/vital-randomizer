@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -18,10 +19,14 @@
     wavetable and sample data.
 
     The trick is that a roll is fully determined by its recipe (style, sliders,
-    amount, locks, seed), and the generator splits its random streams so that
-    recipe reproduces the same patch every time. History therefore stores
-    recipes at about a hundred bytes each rather than patches at a megabyte, and
-    a thousand-deep history costs less than a tenth of a megabyte.
+    amount, locks, seed, and the level the screen settled on), and the generator
+    splits its random streams so that recipe reproduces the same patch every
+    time. A VARY's recipe adds the recipe of the patch it started from, so it
+    replays by rebuilding that first. History therefore stores recipes at a few
+    hundred bytes each rather than patches at a megabyte. The exception is a
+    VARY of something no recipe rebuilds, a recalled keeper or a patch restored
+    with a project, and every sixty-fourth link of a long run, which keep the
+    patch itself.
 
     Keepers are different. Once a patch is starred the user may have hand edited
     it in Vital's own GUI, and a hand edit cannot be regenerated from a recipe,
@@ -43,12 +48,43 @@ namespace store
             would walk a different scale every time history replayed it. */
         int scale = -1;
 
+        /*  The level the screen settled on, as Vital's master volume.
+
+            The screen matches every patch's level by moving its volume, after
+            the generator has finished with it, so a recipe replayed without it
+            came back at whatever level it happened to be generated at. Stepping
+            back through history jumped in level from one patch to the next.
+            Negative when unknown, which is every recipe saved before this.
+        */
+        float volume = -1.0f;
+
+        /*  What a VARY started from.
+
+            A VARY is not a fresh roll: it is a patch moved by a depth, and
+            without the patch it moved there is nothing to replay. So a VARY's
+            recipe points at the recipe of the patch it started from, which may
+            itself be a VARY, and replaying walks back to the fresh roll at the
+            root. Where the starting patch cannot be rebuilt from a recipe, a
+            recalled keeper or a patch restored with a project, or where the
+            chain has grown long, the patch itself is kept instead.
+        */
+        std::shared_ptr<const Recipe> variedFrom;
+        std::shared_ptr<const nlohmann::json> variedFromPatch;
+        std::vector<std::string> varySections;
+
+        /** How many VARYs deep this is, 0 for a fresh roll. */
+        int chainLength() const;
+
         gen::Request toRequest() const;
         static Recipe fromRequest (const gen::Request& r, unsigned int seed);
 
         nlohmann::json toJson() const;
         static Recipe fromJson (const nlohmann::json& j);
     };
+
+    /** Build the patch a recipe describes, following a VARY back to what it
+        started from and putting the screened level back. */
+    gen::Result rebuild (gen::Generator& generator, const Recipe& recipe);
 
     struct Keeper
     {

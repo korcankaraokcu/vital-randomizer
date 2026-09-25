@@ -22,6 +22,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "../src/Audition.h"
+#include "../src/CandidateStore.h"
 #include "../src/Archetypes.h"
 #include "../src/SampleFactory.h"
 #include "../src/WavetableFactory.h"
@@ -241,6 +242,8 @@ int main (int argc, char** argv)
     juce::File pairsTo;
     juce::File dirtLadderTo;
     juce::File typesTo;
+    juce::File varyTo;
+    bool historyCheck = false;
     // Which scale the gesture demo walks. The shapes read differently on a
     // seven note maqam than on a pentatonic, and the note floor bites hardest
     // on the big scales, so it has to be possible to ask for one.
@@ -280,6 +283,8 @@ int main (int argc, char** argv)
         if (arg.startsWith ("--pairs="))    pairsTo = juce::File (value);
         if (arg.startsWith ("--dirt-ladder=")) dirtLadderTo = juce::File (value);
         if (arg.startsWith ("--distortion-types=")) typesTo = juce::File (value);
+        if (arg.startsWith ("--vary=")) varyTo = juce::File (value);
+        if (arg == "--history-check") historyCheck = true;
         if (arg.startsWith ("--gesture-scale=")) gestureScale = value;
         if (arg.startsWith ("--renders="))
         {
@@ -395,6 +400,310 @@ int main (int argc, char** argv)
         rolled again into a different patch, and then the two sides are no longer
         the same patch with one slider moved.
     */
+    /*  Whether history brings a patch back exactly as it was heard.
+
+        Patches are made the way the plugin makes them, a fresh roll and then
+        VARYs chained on it and one VARY started from a patch no recipe can
+        rebuild, each level matched as the screen would. Each is recorded the
+        way the plugin records it, then rebuilt from its recipe and compared
+        with what was heard, whole, and again after the history has been saved
+        and read back. The old replay is shown beside it for comparison.
+    */
+    if (historyCheck)
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+
+        const std::set<schema::Section> sections { schema::Section::filter, schema::Section::env };
+        int exact = 0, exactAfterSave = 0, oldExact = 0, total = 0;
+
+        for (const auto& styleName : styles)
+        {
+            const auto defaults = archetype::defaultSlidersFor (styleName.toStdString());
+            gen::Request request;
+            request.style = styleName.toStdString();
+            request.amount = 1.0f;
+            request.sliders = {
+                { "bright", defaults.bright }, { "dirt", defaults.dirt },
+                { "space", defaults.space },   { "move", defaults.move },
+                { "complexity", defaults.complexity } };
+
+            const auto screen = [&] (gen::Result& r)
+            {
+                if (! r.ok || ! host.applyPreset (r.preset))
+                    return false;
+                audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+                loudness::normalise (r.preset["settings"], m.rms, m.peak);
+                return true;
+            };
+            const auto record = [] (const gen::Request& req, const gen::Result& r)
+            {
+                auto recipe = store::Recipe::fromRequest (req, r.seed);
+                recipe.scale = r.scale;
+                recipe.amount = r.amount;
+                recipe.volume = (float) r.preset["settings"].value ("volume", -1.0);
+                return recipe;
+            };
+
+            std::vector<std::pair<store::Recipe, nlohmann::json>> heard;
+
+            request.seed = (unsigned int) (0x415700u + (unsigned int) heard.size()) | 1u;
+            auto fresh = generator.roll (request);
+            if (! screen (fresh))
+                continue;
+            auto liveRecipe = std::make_shared<const store::Recipe> (record (request, fresh));
+            nlohmann::json live = fresh.preset;
+            heard.emplace_back (*liveRecipe, live);
+
+            for (int k = 0; k < 4; ++k)
+            {
+                gen::Request vary = request;
+                vary.seed = (unsigned int) (0x7A4E00u + (unsigned int) k * 7919u) | 1u;
+                vary.base = &live;
+                vary.amount = 0.5f;
+                vary.varySections = sections;
+                auto varied = generator.roll (vary);
+                if (! screen (varied))
+                    break;
+
+                auto recipe = record (vary, varied);
+                for (const auto s : sections)
+                    recipe.varySections.push_back (schema::sectionName (s));
+                // The last one starts from a patch rather than a recipe, the
+                // way a VARY of a recalled keeper does.
+                if (k < 3)
+                    recipe.variedFrom = liveRecipe;
+                else
+                    recipe.variedFromPatch = std::make_shared<const nlohmann::json> (live);
+
+                liveRecipe = std::make_shared<const store::Recipe> (recipe);
+                live = varied.preset;
+                heard.emplace_back (recipe, live);
+            }
+
+            store::CandidateStore saved;
+            for (const auto& h : heard)
+                saved.push (h.first);
+            store::CandidateStore reloaded;
+            reloaded.fromJson (nlohmann::json::parse (saved.toJson().dump()));
+
+            juce::String line = styleName.paddedRight (' ', 12);
+            for (size_t i = 0; i < heard.size(); ++i)
+            {
+                const auto again = store::rebuild (generator, heard[i].first);
+                const auto afterSave = store::rebuild (generator, *reloaded.at ((int) i));
+                auto old = generator.roll (heard[i].first.toRequest());
+                const auto same = again.ok && again.preset == heard[i].second;
+                const auto sameAfterSave = afterSave.ok && afterSave.preset == heard[i].second;
+                const auto oldSame = old.ok && old.preset == heard[i].second;
+                ++total;
+                exact += same;
+                exactAfterSave += sameAfterSave;
+                oldExact += oldSame;
+                line << (i == 0 ? "fresh " : "vary" + juce::String ((int) i) + " ")
+                     << (same && sameAfterSave ? "exact" : "DIFFERS") << " (old: "
+                     << (oldSame ? "exact" : "differs") << ")  ";
+            }
+            std::cout << line << std::endl;
+        }
+        std::cout << "\nrebuilt exactly: " << exact << " of " << total
+                  << ", after a save and reload: " << exactAfterSave << " of " << total
+                  << ", with the old replay: " << oldExact << " of " << total << std::endl;
+
+        /*  Going back and adding keeps what came after.
+
+            Three candidates, back to the first, one more: all four have to
+            still be there, in order, with the new one last and current.
+        */
+        bool kept = true;
+        {
+            store::CandidateStore strip;
+            for (unsigned int n = 1; n <= 3; ++n)
+            {
+                store::Recipe r;
+                r.seed = n;
+                strip.push (r);
+            }
+            strip.setCursor (0);
+            store::Recipe fourth;
+            fourth.seed = 4;
+            strip.push (fourth);
+            kept = strip.size() == 4 && strip.cursor() == 3;
+            for (int n = 0; n < 4 && kept; ++n)
+                kept = strip.at (n) != nullptr && strip.at (n)->seed == (unsigned int) (n + 1);
+            std::cout << "going back and adding keeps the rest: " << (kept ? "yes" : "NO") << std::endl;
+        }
+
+        return exact == total && exactAfterSave == total && kept ? 0 : 1;
+    }
+
+    /*  What VARY does to a patch, measured and written out for listening.
+
+        Two fresh patches per style, each varied the way the plugin does it, at
+        four depths and then five times in a row at the default of 25%. For
+        each one it counts what changed and how far the sound moved: the level
+        matched spectral distance from the original, over the distance between
+        two takes of the original, so 1.0 is Vital's own take to take scatter.
+    */
+    if (varyTo != juce::File())
+    {
+        auto init = host.currentPreset();
+        if (init.is_null() || ! init.contains ("settings"))
+        {
+            std::cout << "could not read Vital's init patch" << std::endl;
+            return 1;
+        }
+        init.erase ("tuning");
+        generator.setInitPreset (std::move (init));
+        varyTo.createDirectory();
+
+        const auto takes = [&] (const nlohmann::json& preset)
+        {
+            std::vector<std::vector<float>> out;
+            if (! host.applyPreset (preset))
+                return out;
+            audition::settle (*host.processor(), kSampleRate, kBlockSize);
+            for (int i = 0; i < 3; ++i)
+                out.push_back (thirdOctaves (renderNote (*host.processor())));
+            return out;
+        };
+        const auto median3 = [] (float a, float b, float c)
+        { return std::max (std::min (a, b), std::min (std::max (a, b), c)); };
+
+        const auto macroRoutes = [] (const nlohmann::json& st)
+        {
+            int n = 0;
+            for (const auto& slot : st["modulations"])
+                if (slot.contains ("source") && slot["source"].is_string()
+                    && slot["source"].get<std::string>().rfind ("macro_control", 0) == 0)
+                    ++n;
+            return n;
+        };
+        const auto depthSum = [] (const nlohmann::json& st)
+        {
+            double sum = 0.0;
+            for (size_t i = 0; i < st["modulations"].size(); ++i)
+            {
+                const auto& slot = st["modulations"][i];
+                if (slot.contains ("source") && slot["source"].is_string()
+                    && ! slot["source"].get<std::string>().empty())
+                    sum += std::abs (st.value ("modulation_" + std::to_string (i + 1) + "_amount", 0.0));
+            }
+            return sum;
+        };
+
+        std::cout << juce::String ("patch").paddedRight (' ', 26)
+                  << juce::String ("sound moved").paddedRight (' ', 13)
+                  << juce::String ("values").paddedRight (' ', 9)
+                  << juce::String ("tables").paddedRight (' ', 8)
+                  << juce::String ("lfos").paddedRight (' ', 6)
+                  << juce::String ("macro routes").paddedRight (' ', 14)
+                  << "total mod depth" << std::endl;
+
+        for (const auto& styleName : styles)
+        {
+            const auto defaults = archetype::defaultSlidersFor (styleName.toStdString());
+            for (int s = 0; s < 2; ++s)
+            {
+                gen::Request fresh;
+                fresh.style = styleName.toStdString();
+                fresh.seed = (unsigned int) (0xBA5E0001u + (unsigned int) s * 2654435761u) | 1u;
+                fresh.amount = 1.0f;
+                fresh.sliders = {
+                    { "bright", defaults.bright }, { "dirt", defaults.dirt },
+                    { "space", defaults.space },   { "move", defaults.move },
+                    { "complexity", defaults.complexity } };
+                auto original = generator.roll (fresh);
+                if (! original.ok || ! host.applyPreset (original.preset))
+                    continue;
+                audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                const auto m0 = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+                loudness::normalise (original.preset["settings"], m0.rms, m0.peak);
+
+                const nlohmann::json base = original.preset;
+                const auto ref = takes (base);
+                if (ref.size() < 3)
+                    continue;
+                const auto scatter = median3 (bandDistance (ref[0], ref[1]),
+                                              bandDistance (ref[1], ref[2]),
+                                              bandDistance (ref[0], ref[2]));
+                const auto& b = base["settings"];
+
+                const auto label = styleName + "_" + juce::String (s + 1);
+                varyTo.getChildFile (label + "_original.vital")
+                      .replaceWithText (juce::String (base.dump()));
+
+                const auto report = [&] (const juce::String& name, const nlohmann::json& preset)
+                {
+                    const auto& v = preset["settings"];
+                    int values = 0;
+                    for (auto it = b.begin(); it != b.end(); ++it)
+                        if (it.value().is_number() && it.key() != "volume" && v.contains (it.key())
+                            && v[it.key()].is_number()
+                            && std::abs (it.value().get<double>() - v[it.key()].get<double>()) > 1.0e-6)
+                            ++values;
+                    int lfos = 0;
+                    for (size_t i = 0; i < b["lfos"].size() && i < v["lfos"].size(); ++i)
+                        if (b["lfos"][i] != v["lfos"][i])
+                            ++lfos;
+                    const auto moved = takes (preset);
+                    float far = 0.0f;
+                    if (moved.size() == 3)
+                        far = median3 (bandDistance (ref[0], moved[0]), bandDistance (ref[1], moved[1]),
+                                       bandDistance (ref[2], moved[2])) / juce::jmax (1.0e-3f, scatter);
+                    std::cout << (label + " " + name).paddedRight (' ', 26)
+                              << (juce::String (far, 1) + "x").paddedRight (' ', 13)
+                              << juce::String (values).paddedRight (' ', 9)
+                              << juce::String (b["wavetables"] != v["wavetables"] ? "new" : "kept").paddedRight (' ', 8)
+                              << juce::String (lfos).paddedRight (' ', 6)
+                              << (juce::String (macroRoutes (b)) + " > " + juce::String (macroRoutes (v))).paddedRight (' ', 14)
+                              << juce::String (depthSum (b), 2) << " > " << juce::String (depthSum (v), 2)
+                              << std::endl;
+                    varyTo.getChildFile (label + "_" + name.replace (" ", "_") + ".vital")
+                          .replaceWithText (juce::String (preset.dump()));
+                };
+
+                const auto varyOnce = [&] (const nlohmann::json& from, float depth, unsigned int seed)
+                {
+                    gen::Request request = fresh;
+                    request.seed = seed;
+                    request.base = &from;
+                    request.amount = depth;
+                    request.varySections = { schema::Section::filter, schema::Section::env };
+                    auto result = generator.roll (request);
+                    if (! result.ok || ! host.applyPreset (result.preset))
+                        return from;
+                    audition::settle (*host.processor(), kSampleRate, kBlockSize);
+                    const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
+                    loudness::normalise (result.preset["settings"], m.rms, m.peak);
+                    return result.preset;
+                };
+
+                for (const auto depth : { 0.02f, 0.25f, 0.5f, 1.0f })
+                {
+                    const auto pct = juce::roundToInt (depth * 100.0f);
+                    report ("depth " + juce::String (pct).paddedLeft ('0', 3),
+                            varyOnce (base, depth, fresh.seed + 7919u * (unsigned int) pct));
+                }
+
+                nlohmann::json chained = base;
+                for (int k = 0; k < 5; ++k)
+                    chained = varyOnce (chained, 0.25f, fresh.seed + 104729u * (unsigned int) (k + 1));
+                // Named for its depth, so it cannot be mistaken for five at full depth.
+                report ("five at 025", chained);
+            }
+        }
+        std::cout << "written to " << varyTo.getFullPathName() << std::endl;
+        return 0;
+    }
+
     /*  One patch in each of Vital's six distortion circuits, for listening.
 
         DIRT 0.75, where all six are open, one seed per style, and everything

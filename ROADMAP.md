@@ -26,6 +26,13 @@ which the centroid barely sees, and Percussion and Keys are short enough that
 there is little held note for anything to wander in. That points at the metric
 before the axis, which is the order DIRT turned out to need as well.
 
+There is a lead on the axis itself too, found while giving VARY the LFO rates.
+MOVE's rate lever is each LFO's frequency, but most LFOs run synced to the tempo
+and a synced LFO ignores its frequency: 350 of 384 LFOs in a batch were synced,
+and 361 of the 367 not running free sat on the same note division. So for nearly
+every LFO, MOVE's rate control is connected to nothing, and the rate it should
+be moving is the note division.
+
 ## 2. DIRT reads 80% in the harness and 93% on saved pairs
 
 DIRT is now scored against a clean twin of each patch, and on the same seeds the

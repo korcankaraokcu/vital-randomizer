@@ -547,6 +547,23 @@ namespace gen
         */
         const auto base = (unsigned int) rng();
 
+        /*  VARY moves a patch, it does not rebuild it.
+
+            On a fresh roll the axes draw their parameters outright. On VARY
+            they used to do the same, whatever the depth, so the smallest VARY
+            redrew every filter cutoff, every effect level and every LFO rate an
+            axis owns. Now a VARY moves each one toward where the axis would
+            draw it by the depth and no further, leaves the switches and the
+            circuit choices alone, which are the patch's structure, and only
+            touches the sections it was asked to.
+        */
+        const auto varying = r.base != nullptr;
+        const auto mayVary = [&r, varying] (const std::string& key)
+        {
+            return ! varying || r.varySections.empty()
+                   || r.varySections.count (schema::sectionOf (key)) > 0;
+        };
+
         for (const auto& axis : axes::all())
         {
             const auto slider = r.sliders.find (axis.key);
@@ -558,11 +575,18 @@ namespace gen
             {
                 if (r.locks.count (schema::sectionOf (member.first)) > 0)
                     continue;
+                if (! mayVary (member.first))
+                    continue;
                 auto own = streamFor (base, member.first, 0xA1u);
                 const auto p = skew (uniform (own), (value - 0.5f) * 2.0f * member.second);
                 float sampled = 0.0f;
                 if (sampleInRange (member.first, p, sampled))
                 {
+                    if (varying && settings[member.first].is_number())
+                    {
+                        const auto current = settings[member.first].get<float>();
+                        sampled = current + (sampled - current) * juce::jlimit (0.0f, 1.0f, r.amount);
+                    }
                     settings[member.first] = sampled;
                     touched.insert (member.first);
                 }
@@ -575,6 +599,8 @@ namespace gen
             // which reads as a broken slider.
             for (const auto& sw : axis.enables)
             {
+                if (varying)
+                    break;
                 if (! settings.contains (sw)
                     || r.locks.count (schema::sectionOf (sw)) > 0)
                     continue;
@@ -588,6 +614,8 @@ namespace gen
             // brightness ramp, so an extreme slider flips them.
             for (const auto& param : axes::flippable (axis, keys))
             {
+                if (varying)
+                    break;
                 if (r.locks.count (schema::sectionOf (param)) > 0)
                     continue;
                 auto own = streamFor (base, param, 0xF3u);
@@ -623,7 +651,8 @@ namespace gen
             if (touched.count (key) > 0)
                 continue;
             const auto section = schema::sectionOf (key);
-            if (section == schema::Section::excluded || r.locks.count (section) > 0)
+            if (section == schema::Section::excluded || r.locks.count (section) > 0
+                || ! mayVary (key))
                 continue;
             auto own = streamFor (base, key, 0x17u);
             if (uniform (own) > r.amount * breadth)
@@ -671,8 +700,15 @@ namespace gen
             { "env_1_release", shape.release },
         };
 
+        /*  On VARY the envelope is not drawn again, since VARY nudges it by
+            depth along with the rest of the envelope section. Only the style's
+            hard limits below still apply, and they only act on a value that
+            breaks them.
+        */
         for (const auto& stage : stages)
         {
+            if (r.base != nullptr)
+                break;
             if (std::abs (stage.second) < 1.0e-6f)
                 continue;
             float sampled = 0.0f;
@@ -714,8 +750,12 @@ namespace gen
 
         // The body of a struck note comes from its decay, not its release.
         if (shape.decayFloor > 0.0f && settings.contains ("env_1_decay"))
-            settings["env_1_decay"] = shape.decayFloor
-                                          + uniform (rng) * (shape.decayCeiling - shape.decayFloor);
+        {
+            const auto decay = settings["env_1_decay"].get<float>();
+            if (r.base == nullptr || decay < shape.decayFloor || decay > shape.decayCeiling)
+                settings["env_1_decay"] = shape.decayFloor
+                                              + uniform (rng) * (shape.decayCeiling - shape.decayFloor);
+        }
 
         if (settings.contains ("env_1_release"))
         {
@@ -731,7 +771,7 @@ namespace gen
             playing a bass part is already reaching for the bottom two octaves,
             and a patch that drops another two lands under the speaker.
         */
-        if (settings.contains ("osc_1_transpose")
+        if (settings.contains ("osc_1_transpose") && r.base == nullptr
             && r.locks.count (schema::Section::osc) == 0)
         {
             const auto lowRegister = r.style == "Bass" || r.style == "Percussion";
@@ -741,6 +781,105 @@ namespace gen
             else
                 settings["osc_1_transpose"] = lowRegister ? -12.0
                                                           : (roll < 0.95f ? -12.0 : 12.0);
+        }
+    }
+
+    void Generator::varyMotion (const Request& r, nlohmann::json& settings, unsigned int seed)
+    {
+        /*  VARY moves the motion as well as the tone.
+
+            It keeps the LFO shapes and what they are wired to, since those are
+            the patch's identity, and moves how fast they run and how far they
+            reach, each by the depth. How likely any one of them is to move,
+            and how far, both scale with the depth, the same way the filters
+            and envelopes do.
+
+            A rate is two different knobs depending on the LFO. Most run synced
+            to the tempo, and a synced LFO ignores its frequency: 350 of 384 in a
+            batch were synced, and 361 of the 367 not running free sat on the
+            same note division. So a synced one steps a division up or down,
+            half or double the speed, and only a free running one has its
+            frequency nudged. One that follows the keyboard keeps its rate,
+            since that rate is the note played.
+
+            Left out on purpose: anything driving pitch, so a sequence keeps
+            its tempo and its steps land on the same notes and a vibrato keeps
+            its speed, and the macros, which are the player's own knobs.
+            Depths are scaled by a factor centred on one, so a run of VARYs
+            wanders rather than drifting one way, which is what scaling them by
+            MOVE on every VARY used to do.
+        */
+        if (r.base == nullptr || ! settings.contains ("modulations") || ! settings["modulations"].is_array())
+            return;
+        const auto depth = juce::jlimit (0.0f, 1.0f, r.amount);
+        if (depth <= 0.0f)
+            return;
+
+        const auto complexity = r.sliders.count ("complexity") > 0
+                                    ? r.sliders.at ("complexity") : 0.5f;
+        const auto chance = depth * juce::jmap (complexity, 0.0f, 1.0f, 0.25f, 0.85f);
+        const auto base = seed ^ 0x40710000u;
+        auto& mods = settings["modulations"];
+
+        std::set<std::string> pitchDrivers;
+        for (const auto& slot : mods)
+            if (! modSource (slot).empty() && axes::isPitchDestination (modDest (slot)))
+                pitchDrivers.insert (modSource (slot));
+
+        if (r.locks.count (schema::Section::lfo) == 0)
+        {
+            std::vector<std::string> sources;
+            for (int n = 1; n <= 8; ++n)
+                sources.push_back ("lfo_" + std::to_string (n));
+            for (int n = 1; n <= 4; ++n)
+                sources.push_back ("random_" + std::to_string (n));
+
+            for (const auto& source : sources)
+            {
+                if (pitchDrivers.count (source) > 0)
+                    continue;
+                auto own = streamFor (base, source, 0x51u);
+                const auto roll = uniform (own);
+                const auto up = uniform (own) < 0.5f;
+                const auto nudge = gaussian (own, 0.8f * depth);
+                if (roll > chance)
+                    continue;
+
+                const auto sync = settings.value (source + "_sync", 0.0);
+                const auto tempoKey = source + "_tempo";
+                const auto freqKey = source + "_frequency";
+                if (sync >= 0.5 && sync < 3.5 && settings.contains (tempoKey))
+                {
+                    // Tempo, dotted or triplet: a note division either way.
+                    const auto tempo = settings[tempoKey].get<double>();
+                    settings[tempoKey] = juce::jlimit (3.0, 10.0, tempo + (up ? 1.0 : -1.0));
+                }
+                else if (sync < 0.5 && settings.contains (freqKey))
+                {
+                    float low = 0.0f, high = 0.0f;
+                    if (archetype::rangeFor (freqKey, low, high))
+                        settings[freqKey] = juce::jlimit (low, high, settings[freqKey].get<float>() + nudge);
+                }
+            }
+        }
+
+        if (r.locks.count (schema::Section::mod) == 0)
+        {
+            for (size_t i = 0; i < mods.size(); ++i)
+            {
+                const auto source = modSource (mods[i]);
+                if (source.empty() || source.rfind ("macro_control", 0) == 0
+                    || axes::isPitchDestination (modDest (mods[i])))
+                    continue;
+
+                const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
+                auto own = streamFor (base, key, 0x62u);
+                const auto roll = uniform (own);
+                const auto factor = std::exp (gaussian (own, 0.35f * depth));
+                if (roll > chance || ! settings.contains (key))
+                    continue;
+                settings[key] = juce::jlimit (-1.0f, 1.0f, settings[key].get<float>() * factor);
+            }
         }
     }
 
@@ -757,7 +896,11 @@ namespace gen
             Depth is scaled rather than set, so the shape the archetype designed
             survives and only its reach changes.
         */
-        if (r.locks.count (schema::Section::mod) > 0
+        /*  Once, on a fresh roll. It multiplies, so running it on every VARY
+            compounded: a few presses at a high MOVE pushed every depth to the
+            end of its range, and at a low MOVE shrank them toward nothing.
+        */
+        if (r.base != nullptr || r.locks.count (schema::Section::mod) > 0
             || ! settings.contains ("modulations") || ! settings["modulations"].is_array())
             return;
 
@@ -1146,6 +1289,33 @@ namespace gen
         ensureModSlots (settings);
         auto& mods = settings["modulations"];
 
+        /*  VARY keeps the macros it was given.
+
+            Rewiring ran on every VARY, and a macro that already had a routing
+            got another one to a destination not yet taken, and was renamed for
+            the new one, while the old routing stayed. After a few VARYs a knob
+            named for the cutoff moved three other things as well. The names and
+            destinations are read back instead, for the summary shown under the
+            strip.
+        */
+        if (r.base != nullptr)
+        {
+            for (int i = 0; i < kMacros; ++i)
+            {
+                const auto source = "macro_control_" + std::to_string (i + 1);
+                for (const auto& slot : mods)
+                    if (modSource (slot) == source)
+                    {
+                        result.macroDests[static_cast<size_t> (i)] = modDest (slot);
+                        break;
+                    }
+                const auto key = "macro" + std::to_string (i + 1);
+                if (doc.contains (key) && doc[key].is_string())
+                    result.macroNames[static_cast<size_t> (i)] = doc[key].get<std::string>();
+            }
+            return;
+        }
+
         /*  Four wired, named macros on every patch. Macros are the most used
             modulation source in hand-made presets, ahead of the LFOs, and
             they are the only part a producer can automate from the host. A
@@ -1338,7 +1508,8 @@ namespace gen
                 settings[key] = amount < 0.0f ? -cap : cap;
         }
 
-        if (pitchDrivers.empty() || ! sequenced)
+        // VARY keeps the riff it was given: its scale, its steps and its rate.
+        if (pitchDrivers.empty() || ! sequenced || r.base != nullptr)
             return;
 
         /*  A scale, not all twelve semitones.
@@ -1818,6 +1989,7 @@ namespace gen
                 asked + off * std::abs (off) * 0.38f * request.complexityWobble);
         }
         const Request& r = adjusted;
+        result.amount = r.amount;
 
         // VARY keeps the patch it started from. A fresh roll starts from init
         // with the archetype over it.
@@ -1841,7 +2013,13 @@ namespace gen
             synthesiseSample (r, settings, samplerng);
         }
 
-        synthesiseContent (r, settings, contentrng);
+        /*  VARY keeps what was synthesised: the wavetables, the LFO shapes and
+            with them a sequence's riff. They used to be written afresh on
+            every VARY, whatever its depth, so even the smallest VARY swapped
+            the oscillators' timbre and the shape of every LFO for new ones.
+        */
+        if (r.base == nullptr)
+            synthesiseContent (r, settings, contentrng);
         applyAxes (r, settings, prng);
         switchDistortion (r, settings);
         chooseWarp (r, settings, seed);
@@ -1849,6 +2027,7 @@ namespace gen
             wireRouting (*style, r, settings, srng);
         wireMacros (r, result.preset, settings, result);
         scaleModulationDepth (r, settings);
+        varyMotion (r, settings, seed);
         keepStruckNotesStruck (r, settings);
         shapeDistortion (r, settings, seed);
         applyNoteShape (r, settings, prng);

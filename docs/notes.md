@@ -114,9 +114,10 @@ Drop **Vital Randomizer** on a MIDI track. It finds Vital on its own, and a
 fresh install is all it needs. Then:
 
 - **ROLL** makes a fresh patch from the style and the sliders.
-- **VARY** drifts the current patch instead of replacing it, with the small
-  slider beside it setting how far. This is where usable patches actually come
-  from.
+- **VARY** moves the current patch instead of replacing it: the filters, the
+  envelopes, the LFO rates and the modulation depths, by the depth set on the
+  bar beside it, which the button also shows.
+  This is where usable patches actually come from.
 - **BRIGHT / MOVE / DIRT / SPACE** set the character, and **COMPLEX** sets how
   much of the synth a patch may use.
 - **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
@@ -337,10 +338,11 @@ the sliders is worse than no prepared patch at all.
 
 **History costs nothing.** A patch is around 856 KB and almost all of that is
 wavetable and sample data, but its 451 knobs are only 22 KB. A roll is fully
-determined by its recipe (style, sliders, amount, locks, seed) and the generator
-splits its random streams so that recipe reproduces the same patch every time,
-so history stores recipes at about a hundred bytes each. A thousand-deep history
-costs less than a tenth of a megabyte. Keepers are different, since a hand edit
+determined by its recipe (style, sliders, amount, locks, seed, and the level the
+screen settled on) and the generator splits its random streams so that recipe
+reproduces the same patch every time, so history stores recipes at a few
+hundred bytes each, a VARY's recipe pointing at the recipe it started from.
+Keepers are different, since a hand edit
 in Vital's own GUI cannot be regenerated from a recipe, so those hold the real
 JSON. Nothing touches disk unless you export.
 
@@ -815,6 +817,66 @@ builds two seeds per style at DIRT 0, 0.25, 0.5, 0.75 and 1, level matched, and
 within a seed only what DIRT sets differs. `vrtest --distortion-types=<dir>`
 builds one patch per style in each of the six circuits at DIRT 0.75, differing
 in the circuit alone.
+
+## What VARY keeps, and how history brings it back
+
+VARY was meant to keep a patch and only move the sections most responsible for
+its character, and the request said so, but nothing in the generator read that
+part of it. Measured with `vrtest --vary=<dir>`, two patches per style varied at
+four depths and five times in a row: even at a depth of 0.02 it changed 60 to 78
+values, replaced every wavetable and four to seven LFO shapes, and how far the
+sound moved had no order to it at all. A VARY also wired each macro to one more
+destination and renamed it after the new one while the old routing stayed, and
+it scaled every modulation depth by MOVE again, so five presses took four macro
+routings to thirteen and the total modulation depth to two or three times where
+it started.
+
+Now it keeps the wavetables, the LFO shapes and their wiring, a sequence's
+riff and the macros, and leaves the switches and circuit choices alone. What it
+moves, each by the depth: the filter and envelope sections, toward where their
+axis would draw them; how fast each LFO and random source runs; and how far each
+modulation reaches, scaled by a factor centred on one so a run of VARYs wanders
+rather than drifting one way.
+
+A rate is two knobs depending on the LFO. Most run synced to the tempo and
+ignore their frequency: 350 of 384 LFOs in a batch were synced, and 361 of the
+367 not running free sat on the same note division. So a synced one steps a
+division up or down and only a free running one has its frequency nudged. One
+that follows the keyboard keeps its rate. Anything driving pitch keeps both its rate and its depth, so a riff keeps
+its tempo and lands on the same notes and a vibrato keeps its speed, and macro
+routings are the player's own and are left alone.
+
+At 0.02 it changes 7 to 9 values and at full depth 23 to 49, and the median
+distance the sound moves, against two takes of the same patch, goes 1.0x, 1.3x,
+1.4x, 1.7x across the four depths. That measure compares the average tone of a
+held note, so it sees the filters and envelopes and mostly misses the rates,
+which change when things happen rather than what they sound like on average.
+Five VARYs in a row leave the total modulation depth at 0.98 to 1.02 of where it
+started. A fresh roll is byte for byte what it was before.
+
+History could not bring a VARY back. An entry recorded the style, sliders and
+seed, which rebuilds a fresh roll and not a patch that was moved from another,
+so stepping back onto a VARY rolled something new. It could not bring anything
+back at its level either, since the screen matches level by moving the master
+volume after the generator is done and the entry never stored it. An entry now
+records that volume, and a VARY records the entry it started from, so replaying
+walks back to the fresh roll and forward again. Where the starting patch has no
+recipe, a recalled keeper or a patch restored with a project, which may carry
+edits made by hand in Vital, the patch itself is kept, and so is every
+sixty-fourth link of a long run so replaying never has to walk further than
+that. Links are written once each when a project is saved.
+
+`vrtest --history-check` makes a fresh roll, four VARYs on it and one started
+from a patch, for every style, and rebuilds each from its recipe: 40 of 40 come
+back exactly as they were heard, and 40 of 40 again after the history has been
+saved and read back. The old replay managed 3.
+
+New entries always go on the end. A roll or a VARY made while sitting back in
+history used to delete everything after it, the way an edit after an undo does,
+so going back to the first of three VARYs to try another threw the other two
+away. History is the candidates being chosen between rather than an undo stack,
+and nothing depends on where an entry sits, so only the limit removes anything
+now. The same check covers it.
 
 ## Three renders, and why it is not two
 

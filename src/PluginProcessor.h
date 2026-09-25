@@ -124,8 +124,11 @@ private:
     juce::String requestSignature() const;
     void dropPrefetch();
     void setStatus (const juce::String& message, float progress, bool working);
-    void applyResult (gen::Result& result, bool pushToHistory);
+    void applyResult (gen::Result& result, bool pushToHistory, bool varied = false);
     gen::Request buildRequest() const;
+    /** The sections VARY is allowed to move. */
+    static std::set<schema::Section> varySections()
+    { return { schema::Section::filter, schema::Section::env }; }
     /** Render a candidate offline, match its level, and say whether it is
         worth handing to the user. */
     bool screen (gen::Result& result, audition::Measurement& measured);
@@ -181,6 +184,10 @@ private:
     juce::String errorText;
 
     nlohmann::json livePreset;
+    /*  The recipe that rebuilds livePreset, or nothing when no recipe can: a
+        recalled keeper, or a patch restored with a project, may carry edits
+        made by hand in Vital. A VARY records it as what it started from. */
+    std::shared_ptr<const store::Recipe> liveRecipe;
     juce::CriticalSection livePresetLock;
     juce::String auditionSummary;
 

@@ -96,6 +96,7 @@ target_sources(vrtest PRIVATE
     src/Axes.cpp
     src/Archetypes.cpp
     src/Generator.cpp
+    src/CandidateStore.cpp
     src/Loudness.cpp)
 
 target_compile_definitions(vrtest PUBLIC

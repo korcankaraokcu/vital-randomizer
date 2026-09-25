@@ -254,6 +254,10 @@ void VitalRandomizerProcessor::performRoll (Job job)
         const auto& kept = candidateStore.keepers();
         if (index >= kept.size())
             return;
+        {
+            const juce::ScopedLock sl (livePresetLock);
+            liveRecipe = nullptr;
+        }
 
         // A keeper carries its real patch, because once it has been hand edited
         // in Vital's own GUI there is no recipe that reproduces it.
@@ -265,7 +269,14 @@ void VitalRandomizerProcessor::performRoll (Job job)
         const auto* recipe = candidateStore.current();
         if (recipe == nullptr)
             return;
-        result = generator->roll (recipe->toRequest());
+        // Following a VARY back to what it started from, and putting the level
+        // the screen chose back on, so it comes back as it was heard.
+        result = store::rebuild (*generator, *recipe);
+        if (result.ok)
+        {
+            const juce::ScopedLock sl (livePresetLock);
+            liveRecipe = std::make_shared<const store::Recipe> (*recipe);
+        }
     }
     else
     {
@@ -295,7 +306,7 @@ void VitalRandomizerProcessor::performRoll (Job job)
         return;
     }
 
-    applyResult (result, job == Job::rollNew || job == Job::vary);
+    applyResult (result, job == Job::rollNew || job == Job::vary, job == Job::vary);
 
     // Start on the next one straight away, so the wait lands while the user is
     // playing this one rather than after they ask for another.
@@ -339,11 +350,11 @@ gen::Result VitalRandomizerProcessor::rollScreened (Job job)
                 {
                     request.base = &livePreset;
                     request.amount = varyDepth.load();
-                    // VARY keeps the patch's structure and only respices the
-                    // sections most responsible for its character, so the
+                    // VARY keeps the patch's structure, its oscillators, LFO
+                    // shapes, wiring and macros, and only moves the filters and
+                    // envelopes, the LFO rates and the modulation depths, so the
                     // result is recognisably the same sound, not a new one.
-                    request.varySections = { schema::Section::filter,
-                                             schema::Section::env };
+                    request.varySections = varySections();
                 }
                 result = generator->roll (request);
             }
@@ -500,7 +511,7 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
     return false;
 }
 
-void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHistory)
+void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHistory, bool varied)
 {
     if (pushToHistory)
     {
@@ -509,7 +520,29 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
         // buildRequest draws a fresh scale each time it is called, so the one
         // this patch actually walked has to come from the result.
         request.scale = result.scale;
-        candidateStore.push (store::Recipe::fromRequest (request, result.seed));
+        request.amount = result.amount;
+        auto recipe = store::Recipe::fromRequest (request, result.seed);
+        if (result.preset.contains ("settings"))
+            recipe.volume = (float) result.preset["settings"].value ("volume", -1.0);
+
+        {
+            const juce::ScopedLock sl (livePresetLock);
+            if (varied)
+            {
+                /*  A long run of VARYs is kept short by writing the patch down
+                    every so often, since replaying one means replaying every
+                    step before it. */
+                constexpr int kLongestChain = 64;
+                for (const auto s : varySections())
+                    recipe.varySections.push_back (schema::sectionName (s));
+                if (liveRecipe != nullptr && liveRecipe->chainLength() < kLongestChain)
+                    recipe.variedFrom = liveRecipe;
+                else if (! livePreset.is_null())
+                    recipe.variedFromPatch = std::make_shared<const nlohmann::json> (livePreset);
+            }
+            liveRecipe = std::make_shared<const store::Recipe> (recipe);
+        }
+        candidateStore.push (recipe);
     }
 
     if (! host.applyPreset (result.preset))
@@ -834,6 +867,9 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
     {
         const juce::ScopedLock sl (livePresetLock);
         livePreset = j["preset"];
+        // Saved from Vital as it was playing, so it may carry hand edits that
+        // no recipe reproduces.
+        liveRecipe = nullptr;
     }
 }
 

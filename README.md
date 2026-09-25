@@ -46,8 +46,11 @@ Then rescan plugins in your DAW.
   modulation, and how likely its oscillators are to be warped. Each style starts
   where that style usually sits and individual rolls vary around it, so a batch
   holds both sparse patches and busy ones.
-- **VARY** drifts the current patch instead of replacing it, with the small
-  slider beside it setting how far.
+- **VARY** moves the current patch instead of replacing it. It keeps the
+  oscillators, the LFO shapes and what they are wired to, the macros and a
+  sequence's riff, and nudges the filters, the envelopes, how fast the LFOs run
+  and how far the modulation reaches. The bar beside it sets how far, and the
+  button shows that depth in its name.
 - **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
 - **&lt; &gt;** walk the candidate history and **KEEP** stars one. Starred
   patches sit in the KEPT row: click one to load it, right click to remove it.
