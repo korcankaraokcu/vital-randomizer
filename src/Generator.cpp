@@ -1133,6 +1133,11 @@ namespace gen
                 Vital's drop twelve stack, which put a second, lower pitch under
                 every tuned drum and a sub under the snare, and a wide detuned
                 stack smears a drum's pitch. */
+            /*  None at all on a tuned drum. Measured against recorded toms,
+                a tom's loudest line sat at exactly three times its note, the
+                third oscillator's harmonics, where a drum head has none. */
+            if (kind->tonal && kind->pitched)
+                settings["osc_3_on"] = 0.0;
             if (kind->tonal && settings.value ("osc_3_on", 0.0) >= 0.5)
             {
                 settings["osc_3_transpose"] = kind->transpose;

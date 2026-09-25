@@ -640,6 +640,10 @@ namespace sampler
         {
             const auto modes = r.modes > 0 ? r.modes : 120;
             const auto q = r.q > 0.0f ? (double) r.q : 40.0;
+            // Where the upward tilt turns, and the lowest mode a sixth of it,
+            // so a crash can keep the body a ride does not want.
+            const auto corner = r.corner > 0.0f ? (double) r.corner : 3000.0;
+            const auto lowest = std::max (150.0, corner / 6.0);
             const auto fade = (int) (kRate * 0.05);
             const auto total = kLength + fade;
             const auto pi = juce::MathConstants<double>::pi;
@@ -653,13 +657,13 @@ namespace sampler
             for (int m = 0; m < modes; ++m)
             {
                 const auto u = (double) uniform (rng);
-                const auto hz = 500.0 * std::pow (32.0, std::pow (u, 0.75));
+                const auto hz = lowest * std::pow (16000.0 / lowest, std::pow (u, 0.75));
                 const auto sharp = q * (double) uniform (rng, 0.6f, 1.4f);
                 const auto radius = std::exp (-pi * hz / (sharp * kRate));
                 const auto a1 = 2.0 * radius * std::cos (2.0 * pi * hz / kRate);
                 const auto a2 = radius * radius;
                 const auto gain = (1.0 - a2) * 0.5;
-                const auto lift = (hz / 3000.0) * (hz / 3000.0);
+                const auto lift = (hz / corner) * (hz / corner);
                 const auto weight = lift / (1.0 + lift) / (1.0 + (hz / 11000.0) * (hz / 11000.0))
                                     * (double) uniform (rng, 0.3f, 1.0f);
                 double y1 = 0.0, y2 = 0.0;
@@ -797,7 +801,7 @@ namespace sampler
             }
             BandPass crack (uniform (rng, 1500.0f, 4000.0f), 1.2);
             const auto crackTau = uniform (rng, 0.002f, 0.006f) * kRate;
-            const auto crackShare = (double) uniform (rng, 0.6f, 1.2f);
+            const auto crackShare = (double) uniform (rng, 1.0f, 1.8f);
             for (int i = 0; i < (int) (kRate * 0.03); ++i)
                 v[(size_t) i] += crackShare * 4.0 * crack (uniform (rng, -1.0f, 1.0f)) * std::exp (-i / crackTau);
             return normalisedTo (std::move (v), 0.9);
@@ -811,7 +815,8 @@ namespace sampler
             std::vector<BandPass> wood;
             const auto count = pick (rng, 2, 3);
             for (int i = 0; i < count; ++i)
-                wood.emplace_back (uniform (rng, 900.0f, 3200.0f), uniform (rng, 8.0f, 20.0f));
+                // Claves ring 0.2 to 0.3 s to fall 40 dB, so the wood is sharp.
+                wood.emplace_back (uniform (rng, 900.0f, 3200.0f), uniform (rng, 25.0f, 60.0f));
             BandPass crack (uniform (rng, 3000.0f, 6000.0f), 1.2);
             const auto tau = uniform (rng, 0.010f, 0.025f) * kRate;
             const auto crackTau = uniform (rng, 0.0008f, 0.002f) * kRate;
@@ -897,6 +902,54 @@ namespace sampler
                 l2 = (1.0 - pole) * l1 + pole * l2;
                 v[(size_t) i] += felt * 6.0 * l2 * std::exp (-i / tau);
             }
+            return normalisedTo (std::move (v), 0.9);
+        }
+
+        /*  A cowbell, from four recorded hits of a real one.
+
+            Its partials are metal, the same ratios on every hit, each with its
+            level at a medium strike and how fast it dies. The one at 5.44 is
+            what a harder strike brings up, from 14 dB under the lowest to
+            level with it. A stick's tick sits on top. Built with the lowest
+            partial on C5, 523.25 Hz, to be played keytracked a twelfth up so
+            the preview note plays it at its own speed, two octaves over it.
+        */
+        std::vector<float> clank (std::mt19937& rng, const Request&)
+        {
+            struct Mode { float ratio, db, decay; };
+            static const Mode modes[] = {
+                // The one at 2.13 sits at the soft end of the recordings, -2 to
+                // -10 dB. Near level with the lowest, a pitch read took half of
+                // it, 557 Hz, for the note, a semitone sharp.
+                { 1.00f,  0.0f, 140.0f }, { 1.10f, -16.0f, 148.0f }, { 2.13f, -9.0f, 139.0f },
+                { 3.03f, -13.0f, 150.0f }, { 3.64f, -16.0f, 168.0f }, { 3.88f, -8.0f, 115.0f },
+                { 4.05f, -15.0f, 134.0f }, { 5.44f, -2.0f, 142.0f }, { 7.44f, -13.0f, 172.0f },
+                { 8.14f, -18.0f, 134.0f },
+            };
+            const auto base = 523.25;
+            const auto pi = juce::MathConstants<double>::pi;
+            const auto hard = (double) uniform (rng, 0.0f, 1.0f);
+            std::vector<double> v ((size_t) kLength, 0.0);
+            for (const auto& m : modes)
+            {
+                const auto hz = base * m.ratio * (double) uniform (rng, 0.995f, 1.005f);
+                if (hz > kRate * 0.45)
+                    continue;
+                const auto soft = m.ratio > 5.0f && m.ratio < 6.0f ? -12.0 * (1.0 - hard) : 0.0;
+                const auto amp = std::pow (10.0, (m.db + soft + uniform (rng, -2.0f, 2.0f)) / 20.0);
+                const auto perSample = std::pow (10.0, -m.decay * uniform (rng, 0.85f, 1.15f) / 20.0 / kRate);
+                const auto phase = (double) uniform (rng, 0.0f, 6.2831853f);
+                double level = amp;
+                for (int i = 0; i < kLength; ++i)
+                {
+                    v[(size_t) i] += level * std::sin (2.0 * pi * hz * i / kRate + phase);
+                    level *= perSample;
+                }
+            }
+            BandPass tick (uniform (rng, 3000.0f, 6000.0f), 1.5);
+            const auto tau = uniform (rng, 0.0006f, 0.0015f) * kRate;
+            for (int i = 0; i < (int) (kRate * 0.02); ++i)
+                v[(size_t) i] += 3.0 * tick (uniform (rng, -1.0f, 1.0f)) * std::exp (-i / tau);
             return normalisedTo (std::move (v), 0.9);
         }
 
@@ -1108,6 +1161,7 @@ namespace sampler
         static const Model head   { "Head",   &drumHead,      false, true,  0.30f, 0.50f };
         static const Model wood   { "Stick",  &stick,         false, false, 0.50f, 0.80f };
         static const Model drum   { "Kettle", &kettle,        false, true,  0.80f, 1.00f };
+        static const Model bell   { "Clank",  &clank,         false, true,  0.80f, 1.00f };
         static const Model felt   { "Mallet", &mallet,        false, false, 0.20f, 0.45f };
 
         std::vector<const Model*> allowed;
@@ -1164,7 +1218,7 @@ namespace sampler
         static const Model* const everything[] = { &bed, &struck, &pluck,
                                                    &gritty, &rising, &vocal, &thumped, &noise, &metal,
                                                    &beaded, &felt, &plate, &slap, &head, &wood,
-                                                   &drum };
+                                                   &drum, &bell };
 
         const Model* model = nullptr;
         if (! request.model.empty())

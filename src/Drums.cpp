@@ -64,15 +64,17 @@ namespace drums
                 // The rattle carries more of a snare's energy than its tone
                 // does. A single clean voice at these levels was otherwise
                 // nine tenths bass.
-                k.character = "fundamental"; k.transpose = 5.0f; k.body = { 0.18f, 0.30f };
+                k.character = "fundamental"; k.transpose = 5.0f; k.body = { 0.30f, 0.45f };
                 k.sample = "Noise"; k.sampleLevel = { 0.60f, 0.85f };
                 k.attack = { 0.0f, 0.02f }; k.decay = { 0.70f, 0.82f }; k.release = { 0.20f, 0.35f };
-                // Sampled snares keep the wires up to 8 kHz at 2 to 16 dB under
-                // the loudest band, which a low pass under 5 kHz took away.
-                k.blend = { 0.0f, 0.3f }; k.cutoff = { 112.0f, 124.0f }; k.maxResonance = 0.25f;
+                // Recorded acoustic snares, VSCO 2's and a Yamaha's, centre on
+                // 0.3 to 1.4 kHz with the head at 250 Hz the loudest band and
+                // the wires 15 to 20 dB under it. Brighter references, likely
+                // processed, had taken this to 2.3 to 5 kHz.
+                k.blend = { 0.0f, 0.3f }; k.cutoff = { 98.0f, 110.0f }; k.maxResonance = 0.25f;
                 k.sweep = { 6.0f, 18.0f };
                 k.drop = { 5.0f, 12.0f }; k.dropDecay = { 0.45f, 0.55f };
-                k.brightness = { 700.0f, 6000.0f }; k.maxHeld = 0.35f;
+                k.brightness = { 400.0f, 5000.0f }; k.maxHeld = 0.35f;
                 list.push_back (k);
             }
             {   /*  Clap. No body, only noise through a band pass, struck three
@@ -120,7 +122,9 @@ namespace drums
                 k.tonal = false;
                 k.sample = "Metal"; k.sampleLevel = { 0.85f, 1.00f }; k.metalNoise = { 0.35f, 0.55f };
                 k.metalCorner = { 5000.0f, 7000.0f }; k.metalBanks = 2;
-                k.attack = { 0.0f, 0.01f }; k.decay = { 0.66f, 0.92f }; k.release = { 0.25f, 0.45f };
+                // Recorded open hats ring one to three seconds unchoked. The
+                // key still chokes it, as the pedal does.
+                k.attack = { 0.0f, 0.01f }; k.decay = { 0.80f, 1.05f }; k.release = { 0.25f, 0.45f };
                 k.blend = { 1.0f, 1.0f }; k.cutoff = { 114.0f, 124.0f }; k.maxResonance = 0.08f;
                 k.sweep = { 0.0f, 6.0f };
                 k.secondFilter = false;
@@ -140,11 +144,20 @@ namespace drums
                 Kind k { "Crash" };
                 k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.22 } });
                 k.tonal = false;
-                k.sample = "Cymbal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.10f, 0.25f };
-                k.modes = 200; k.modeQ = { 35.0f, 80.0f };
+                /*  Checked again on real cymbals, VSCO 2's crash and a
+                    suspended cymbal struck with a stick, where the first
+                    references had had their lows cut: a cymbal has a body at
+                    250 Hz to 1 kHz only 4 to 16 dB under its loudest band, its
+                    loudest single lines near 350 Hz, sixty to three hundred
+                    lines standing clear, and it darkens to 1.4 to 2.8 kHz by a
+                    second. So its modes reach down to a couple of hundred
+                    hertz, are sharper, and the filter closes further. */
+                k.sample = "Cymbal"; k.sampleLevel = { 0.60f, 0.85f }; k.metalNoise = { 0.05f, 0.15f };
+                k.metalCorner = { 500.0f, 800.0f };
+                k.modes = 200; k.modeQ = { 150.0f, 350.0f };
                 k.attack = { 0.0f, 0.02f }; k.decay = { 1.25f, 1.45f }; k.release = { 0.80f, 1.20f };
-                k.blend = { 0.0f, 0.1f }; k.cutoff = { 106.0f, 116.0f }; k.maxResonance = 0.1f;
-                k.sweep = { 22.0f, 32.0f }; k.sweepDecay = { 1.10f, 1.25f };
+                k.blend = { 0.0f, 0.1f }; k.cutoff = { 96.0f, 106.0f }; k.maxResonance = 0.1f;
+                k.sweep = { 30.0f, 40.0f }; k.sweepDecay = { 1.05f, 1.20f };
                 k.secondFilter = false;
                 k.brightness = { 2500.0f, 14000.0f }; k.maxHeld = 0.95f;
                 list.push_back (k);
@@ -172,7 +185,10 @@ namespace drums
                 Kind k { "Tom" };
                 k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.12 } });
                 k.routings = { { "env_2", "osc_1_transpose", 0.08f, false } };
-                k.character = "fundamental"; k.transpose = 0.0f;
+                // A pure sine: the fundamental table's faint harmonics were
+                // the only lines in a tom that real ones do not have, standing
+                // 20 to 30 dB clear where recorded toms show nothing above 11.
+                k.character = "sine"; k.transpose = 0.0f;
                 /*  Over the body, the head. A drum head is a membrane, and its
                     overtones sit at 1.59, 2.14, 2.30, 2.65 and 2.92 times the
                     fundamental, off the harmonic series, each dying faster than
@@ -182,8 +198,10 @@ namespace drums
                     overtones stay in place over the note. The thump it had
                     before carried its own falling low pitch and pulled the note
                     down by half an octave. */
-                k.sample = "Head"; k.sampleLevel = { 0.45f, 0.70f }; k.sampleDestination = 3;
-                k.attack = { 0.0f, 0.02f }; k.decay = { 0.85f, 1.00f }; k.release = { 0.30f, 0.50f };
+                k.sample = "Head"; k.sampleLevel = { 0.70f, 0.95f }; k.sampleDestination = 3;
+                // Recorded toms ring 0.7 to 1.4 s to fall 40 dB, and a key let
+                // go early does not stop a real one.
+                k.attack = { 0.0f, 0.02f }; k.decay = { 0.95f, 1.10f }; k.release = { 0.70f, 0.95f };
                 k.blend = { 0.0f, 0.2f }; k.cutoff = { 65.0f, 85.0f }; k.maxResonance = 0.25f;
                 k.sweep = { 6.0f, 18.0f };
                 // A small quick glide, two to five semitones, where sampled toms
@@ -225,17 +243,25 @@ namespace drums
                 k.brightness = { 80.0f, 1500.0f }; k.maxHeld = 0.85f; k.pitched = true;
                 list.push_back (k);
             }
-            {   /*  Cowbell. Two square tones a fifth apart two octaves up, the
-                    classic machine recipe, through a band pass, short. */
+            {   /*  Cowbell. It had been the drum machine's, two square tones a
+                    fifth apart, and tuned against references that turned out
+                    to be processed 808 cowbells from trap packs. A real one,
+                    measured on Versilian's VSCO 2 at four dynamics, is metal:
+                    partials at 1, 1.10, 2.13, 3.03, 3.64, 3.88, 4.05, 5.44,
+                    7.44 and 8.14 times the lowest, the same on every hit, each
+                    dying at 115 to 180 dB a second, and the one at 5.44 as loud
+                    as the lowest on a hard hit and 14 dB under on a soft one.
+                    Two squares are forty to a hundred and twenty harmonic lines
+                    and none of that. So it is the Clank sample, keytracked and
+                    built a twelfth up like the timpani, two octaves over the
+                    key, with the oscillators off. */
                 Kind k { "Cowbell" };
-                k.settings = shared ({ { "osc_2_on", 1.0 }, { "osc_2_level", 0.5 },
-                                       { "reverb_dry_wet", 0.08 } });
-                k.character = "square"; k.transpose = 24.0f; k.secondTranspose = 31.0f;
-                k.attack = { 0.0f, 0.02f }; k.decay = { 0.68f, 0.80f }; k.release = { 0.15f, 0.25f };
-                // Sampled cowbells fall away fast above 1 kHz, 13 to 29 dB down
-                // by 2 kHz, where a band pass at 2 kHz left them buzzing.
-                k.blend = { 0.5f, 0.8f }; k.cutoff = { 82.0f, 92.0f }; k.maxResonance = 0.35f;
-                k.sweep = { 0.0f, 6.0f };
+                k.settings = shared ({ { "osc_2_on", 0.0 }, { "reverb_dry_wet", 0.08 } });
+                k.tonal = false;
+                k.sample = "Clank"; k.sampleLevel = { 0.80f, 1.00f }; k.sampleTranspose = 12.0f;
+                k.attack = { 0.0f, 0.01f }; k.decay = { 0.78f, 0.88f }; k.release = { 0.20f, 0.30f };
+                k.blend = { 0.0f, 0.1f }; k.cutoff = { 118.0f, 128.0f }; k.maxResonance = 0.1f;
+                k.sweep = { 0.0f, 4.0f };
                 k.secondFilter = false;
                 k.brightness = { 500.0f, 4000.0f }; k.maxHeld = 0.35f; k.pitched = true;
                 list.push_back (k);
@@ -254,7 +280,9 @@ namespace drums
                     it. */
                 k.body = { 0.10f, 0.18f };
                 k.sample = "Stick"; k.sampleLevel = { 0.80f, 1.00f };
-                k.attack = { 0.0f, 0.01f }; k.decay = { 0.45f, 0.58f }; k.release = { 0.05f, 0.15f };
+                // Long enough for the wood to ring: claves fall 40 dB in 0.2
+                // to 0.3 s, and a shorter envelope cut the Stick sample off.
+                k.attack = { 0.0f, 0.01f }; k.decay = { 0.66f, 0.76f }; k.release = { 0.05f, 0.15f };
                 k.blend = { 1.0f, 1.0f }; k.cutoff = { 92.0f, 104.0f }; k.maxResonance = 0.35f;
                 k.sweep = { 0.0f, 8.0f };
                 k.secondFilter = false;

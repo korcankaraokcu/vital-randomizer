@@ -31,7 +31,7 @@ namespace wavetable
             table of pure noise is technically more varied and sounds like a
             fault.
         */
-        enum class Character { fundamental, saw, square, pulse, formant, metallic, vocal, airy, membrane };
+        enum class Character { fundamental, saw, square, pulse, formant, metallic, vocal, airy, membrane, sine };
 
         struct Spectrum
         {
@@ -83,6 +83,8 @@ namespace wavetable
                 case Character::airy:
                     amp = std::exp (-0.06f * n) + 0.12f / n;
                     break;
+                case Character::sine:
+                    return h == 1 ? 1.0f : 0.0f;
                 case Character::membrane:
                 {
                     /*  A timpani's preferred modes, principal, fifth, octave
@@ -215,7 +217,7 @@ namespace wavetable
                     { "square", Character::square }, { "pulse", Character::pulse },
                     { "formant", Character::formant }, { "metallic", Character::metallic },
                     { "vocal", Character::vocal }, { "airy", Character::airy },
-                    { "membrane", Character::membrane } };
+                    { "membrane", Character::membrane }, { "sine", Character::sine } };
                 for (const auto& n : names)
                     if (r.character == n.first)
                         s.character = n.second;
@@ -305,7 +307,13 @@ namespace wavetable
         // A modifier on top costs nothing and is where a lot of the character
         // lives. Vital's own components are algorithms, not data, so these are
         // free to use.
-        if (request.dirt > 0.55f && uniform (rng) < request.dirt)
+        /*  Except on a pure sine, which asked to be one. A tom's body is,
+            and a fold or a warp on it put a second harmonic 9 dB under the
+            note, lines a drum head does not have. */
+        if (request.character == "sine")
+        {
+        }
+        else if (request.dirt > 0.55f && uniform (rng) < request.dirt)
         {
             nlohmann::json kf;
             kf["position"] = 0;

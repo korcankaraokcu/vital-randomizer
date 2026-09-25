@@ -1000,6 +1000,43 @@ of 192 with a handful of level retries. The shaker's troughs deepened by 6 dB
 without the compressor filling them, so the level between strokes rose to keep
 it as it was.
 
+**Checked again on references that are what they say.** The first references
+were whatever a sample site returned for a name, and some were not the thing:
+the cowbells were processed 808 cowbells from trap packs, one open hat was a
+triangle, one tom a Casio keyboard's. The kinds most at risk were measured again
+on recordings of real instruments, VSCO 2's cowbell, crash, suspended cymbal,
+snare and claves, and Creative Commons 0 toms and open hats from Freesound.
+
+- The cowbell had been tuned to the wrong target. A real one is metal, partials
+  at 1, 1.10, 2.13, 3.03, 3.64, 3.88, 4.05, 5.44, 7.44 and 8.14 times the lowest
+  on all four dynamics, each dying at 115 to 180 dB a second, 2 to 4 kHz at -4
+  to -16 dB, where two squares a fifth apart were harmonic lines with 2 to 4 kHz
+  at -10 to -35. It is a keytracked Clank sample now, like the timpani. At the
+  recording's level the partial at 2.13 had a pitch read take half of it for the
+  note, a semitone sharp, so it sits at the soft end of what the recordings
+  show.
+- The crash lacked body. Real cymbals keep 250 Hz to 1 kHz only 4 to 16 dB under
+  their loudest band and darken to 1.4 to 2.8 kHz by a second, where the first
+  references had had their lows cut. Its modes now reach down to 150 Hz under a
+  gentler tilt, are sharper, and the filter closes further: 500 Hz at -18 to -21
+  dB, 54 to 86 lines standing clear, darkening to 2.7 to 4 kHz.
+- The snare had been brightened to match references that were likely processed.
+  Recorded acoustic ones centre on 0.3 to 1.4 kHz with 250 Hz the loudest band,
+  and it does again, with its brightness band lowered to 400 Hz to allow it.
+- The tom's body is a pure sine now, and a new sine character skips the fold or
+  warp the table builder adds, which had put a second harmonic 9 dB under the
+  note. A tuned drum has no third oscillator, whose harmonics were a tom's
+  loudest line above 300 Hz. Its head layer is louder, taking 1 to 4 kHz to -19
+  to -32 dB against -14 to -25 recorded, and it rings 0.5 to 0.8 s to fall 40
+  dB, closer to the recordings' 0.7 to 1.4, with a key let go early no longer
+  stopping it.
+- The rim's wood rings longer, sharper resonances under a longer envelope,
+  though still 0.08 to 0.12 s to fall 40 dB against 0.22 to 0.29 for claves.
+- The open hat rings longer when held, since recorded ones ring one to three
+  seconds unchoked. Its tone was left as it was.
+
+A full screen of all twelve passes 192 of 192.
+
 **Named for what it is.** A roll's name carries its kind, so a batch file reads
 Percussion_04_Crash rather than Percussion_04, and the parts in Vital's panels
 say what they are for: the sample Crash metal or Snare noise, the first
