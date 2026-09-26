@@ -1671,7 +1671,88 @@ namespace gen
             if (settings.contains ("delay_sync") && settings.value ("delay_sync", 1.0) >= 0.5)
                 settings["delay_sync"] = pickFrom ("delay_sync", { { 1.0, 0.82f }, { 2.0, 0.18f } });
             if (settings.contains ("delay_tempo"))
-                settings["delay_tempo"] = pickFrom ("delay_tempo", { { 9.0, 0.72f }, { 8.0, 0.19f }, { 10.0, 0.09f } });
+                // An eighth mostly and a sixteenth often, a quarter rarely. By
+                // ear a delay sits better on an eighth or quicker, and the
+                // library's 19% of quarters was more than it wanted.
+                settings["delay_tempo"] = pickFrom ("delay_tempo", { { 9.0, 0.70f }, { 10.0, 0.25f }, { 8.0, 0.05f } });
+
+            /*  A ping-pong only on a quick delay. Its first echo always lands
+                on the same side and each one after is quieter, so the side
+                that starts is the louder. On a quick delay the echoes run
+                together into one wide wash and the ear evens them out. On a
+                slow one each echo is heard on its own, a hit in one ear, a
+                gap, a weaker hit in the other: measured over the worst 300
+                ms of the tail, 6 to 15 dB to one side at an eighth, 24 to 28
+                at a quarter and 36 to 46 at a dotted quarter, and it was heard
+                as the patch leaning. An echo longer than a straight eighth, on
+                either time, turns the delay to stereo, whose two sides echo
+                together at any tempo. */
+            const auto spacing = [&] (const char* sync, const char* tempo)
+            {
+                const auto s = (int) std::lround (settings.value (sync, 1.0));
+                auto t = std::pow (2.0, 7.0 - settings.value (tempo, 9.0));
+                if (s == 2) t *= 1.5;
+                if (s == 3) t *= 2.0 / 3.0;
+                return s == 0 ? 1.0 : t;     // a free time is treated as slow
+            };
+            const auto style = (int) std::lround (settings.value ("delay_style", 0.0));
+            if ((style == 2 || style == 3)
+                && spacing ("delay_sync", "delay_tempo") > 0.26)
+                settings["delay_style"] = 1.0;
+
+            /*  The two times, even unless COMPLEX asks otherwise.
+
+                A stereo delay's right side and every second echo of a
+                ping-pong follow a second time, which nothing drew: it sat at
+                the init patch's straight eighth, so whenever the first came
+                out otherwise the two disagreed by accident. Hand-made presets
+                set them apart on purpose, half their stereo delays and a third
+                of their ping-pongs. They are even now, and uneven on a chance
+                that rises with COMPLEX, as a warp and a morph do: none at its
+                bottom, 40% of stereo delays at its middle, 80% at its top, and
+                less on a ping-pong. The pairs are the five that were listened
+                to and liked, all on the beat grid. A ping-pong or mid
+                ping-pong takes only the quick one, since a slow echo on it
+                leans the patch. Hand-made mid ping-pongs are nearly all even,
+                but uneven ones were listened to and liked as well. Drawn
+                after the style is settled, so a ping-pong turned to stereo for
+                being slow has the same chance as any other stereo delay. */
+            settings["delay_aux_sync"] = settings.value ("delay_sync", 1.0);
+            settings["delay_aux_tempo"] = settings.value ("delay_tempo", 9.0);
+            {
+                const auto complexity = r.sliders.count ("complexity") > 0
+                                            ? r.sliders.at ("complexity") : 0.5f;
+                const auto kind = (int) std::lround (settings.value ("delay_style", 0.0));
+                auto own = streamFor (seed, "delay_uneven", 0xEF0Du);
+                const auto roll = uniform (own);
+                const auto which = uniform (own);
+                // Sync then tempo, left then right: straight 1, dotted 2,
+                // triplet 3; eighth 9, quarter 8, sixteenth 10.
+                struct Pair { double sync, tempo, auxSync, auxTempo; };
+                static const Pair pairs[] = {
+                    { 1, 9, 1, 8 },     // eighth and quarter
+                    { 1, 9, 2, 9 },     // eighth and dotted eighth
+                    { 1, 9, 3, 9 },     // eighth and triplet eighth
+                    { 1, 10, 2, 9 },    // sixteenth and dotted eighth
+                    { 2, 9, 1, 8 },     // dotted eighth and quarter
+                };
+                if (kind == 1 && roll < 0.8f * complexity)
+                {
+                    const auto& p = pairs[(size_t) juce::jlimit (0, 4, (int) (which * 5.0f))];
+                    settings["delay_sync"] = p.sync;
+                    settings["delay_tempo"] = p.tempo;
+                    settings["delay_aux_sync"] = p.auxSync;
+                    settings["delay_aux_tempo"] = p.auxTempo;
+                }
+                else if ((kind == 2 || kind == 3) && roll < 0.6f * complexity)
+                {
+                    const auto& p = pairs[2];
+                    settings["delay_sync"] = p.sync;
+                    settings["delay_tempo"] = p.tempo;
+                    settings["delay_aux_sync"] = p.auxSync;
+                    settings["delay_aux_tempo"] = p.auxTempo;
+                }
+            }
             /*  The chorus keeps its four voices. Drawn to the library's
                 proportions, one to three voices measured the same width and
                 the same shimmer as four, fully wet on a held pad, and by ear
@@ -1785,15 +1866,23 @@ namespace gen
         {
             // One echo's spacing at 120 BPM. A synced time lasts two to the
             // power of seven minus the tempo in seconds, dotted half as long
-            // again, a triplet two thirds, as the LFOs measured.
-            const auto sync = (int) std::lround (settings.value ("delay_sync", 1.0));
-            auto spacing = 0.25;
-            if (sync >= 1)
+            // again, a triplet two thirds, as the LFOs measured. With the two
+            // times apart, the longer one sets how long the echoes last.
+            const auto spacingOf = [&] (const char* syncKey, const char* tempoKey)
             {
-                spacing = std::pow (2.0, 7.0 - settings.value ("delay_tempo", 9.0));
-                if (sync == 2) spacing *= 1.5;
-                if (sync == 3) spacing *= 2.0 / 3.0;
-            }
+                const auto sync = (int) std::lround (settings.value (syncKey, 1.0));
+                auto spacing = 0.25;
+                if (sync >= 1)
+                {
+                    spacing = std::pow (2.0, 7.0 - settings.value (tempoKey, 9.0));
+                    if (sync == 2) spacing *= 1.5;
+                    if (sync == 3) spacing *= 2.0 / 3.0;
+                }
+                return spacing;
+            };
+            auto spacing = spacingOf ("delay_sync", "delay_tempo");
+            if (settings.value ("delay_style", 0.0) >= 0.5)
+                spacing = juce::jmax (spacing, spacingOf ("delay_aux_sync", "delay_aux_tempo"));
             const auto ceiling = juce::jmin (0.45, std::pow (10.0, -2.0 * spacing / 3.5));
             settings["delay_feedback"] = juce::jmin (settings.value ("delay_feedback", 0.0), ceiling);
         }

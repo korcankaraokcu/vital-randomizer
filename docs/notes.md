@@ -1194,8 +1194,36 @@ type now counts as a dead destination, so no macro and no LFO lands on it.
 |---|---|---|---|
 | Delay style | ping-pong 38%, mono 31%, stereo 20%, mid ping-pong 11% | mono | 40, 32, 20, 8% |
 | Delay dotted | 17% | never | 15% |
+| Delay time: eighth, sixteenth, quarter | 70, 7, 18% | eighth | 70, 25, 5%, by ear |
 | Filter slope, the second | 28 to 36% | never | 30 to 41% |
 | EQ low band as a low cut | 47% | never | 25%, never on a bass or a drum |
+
+A ping-pong was later kept to quick delays. Its first echo always lands on the
+same side and each one after is quieter, so the side that starts is the louder.
+On a quick delay the echoes run together and the ear evens them out. On a slow
+one each is heard on its own, a hit in one ear, a gap, a weaker hit in the
+other, and a listener heard the patch leaning. Measured over the worst 300 ms
+of the tail it was 6 to 15 dB to one side at an eighth, 24 to 28 at a quarter
+and 36 to 46 at a dotted quarter. A ping-pong or mid ping-pong with either
+echo longer than a straight eighth becomes a stereo delay, whose two sides
+echo together at any tempo, and ping-pongs fell from 38% of delays to 23%.
+
+The delay's second time, which a stereo delay plays on its right side and a
+ping-pong on every second echo, was never drawn and sat at the init patch's
+straight eighth, so left and right disagreed by accident whenever the first
+time came out otherwise, in 14 of 34 delays. Hand-made presets set the two
+apart on purpose, half their stereo delays and a third of their ping-pongs.
+They are even now, and uneven on a chance that rises with COMPLEX, as a warp
+and a morph do: none at its bottom, 40% of stereo delays at its middle and 80%
+at its top, and 30% and 60% on a ping-pong or mid ping-pong. The pairs are five
+that were listened to and liked, eighth and quarter, eighth and dotted eighth,
+eighth and triplet eighth, sixteenth and dotted eighth, dotted eighth and
+quarter. A ping-pong or mid ping-pong takes only the quick one, and the style is settled before
+the times, so a ping-pong turned to stereo for being slow has the same chance
+as any other stereo delay. Measured over 96 rolls a setting, stereo delays came
+out uneven 6% of the time at the bottom of COMPLEX, where its wobble lets an
+occasional roll climb, 52% at the middle and 89% at the top. The echo cap reads
+the longer of the two times.
 
 The low cut sits between 50 and 110 Hz. The filter slope is drawn only on the
 classic models, since the formant, comb and phaser models read the style as
