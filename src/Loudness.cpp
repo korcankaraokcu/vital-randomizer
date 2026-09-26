@@ -61,12 +61,12 @@ namespace loudness
         return std::max (kVolumeMin, std::min (kVolumeMax, target));
     }
 
-    float correctionDb (float rms, float peak)
+    float correctionDb (float rms, float peak, float target)
     {
         if (rms <= 1.0e-6f)
             return 0.0f;
 
-        auto gainDb = 20.0f * std::log10 (kTargetRms / rms);
+        auto gainDb = 20.0f * std::log10 (target / rms);
 
         // The peak ceiling only ever pulls down. A patch with a lot of headroom
         // should still be brought up to the target rather than being allowed to
@@ -81,9 +81,14 @@ namespace loudness
         return std::abs (gainDb) < kDeadband ? 0.0f : gainDb;
     }
 
-    float normalise (nlohmann::json& settings, float rms, float peak)
+    float normalisePreset (nlohmann::json& preset, float level, float peak)
     {
-        const auto gainDb = correctionDb (rms, peak);
+        return normalise (preset["settings"], level, peak);
+    }
+
+    float normalise (nlohmann::json& settings, float rms, float peak, float target)
+    {
+        const auto gainDb = correctionDb (rms, peak, target);
         if (gainDb == 0.0f)
             return 0.0f;
 

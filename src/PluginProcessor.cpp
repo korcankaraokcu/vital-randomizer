@@ -485,7 +485,7 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
                 || pitchError > pitch.maxErrorSemitones))
             return false;
 
-        auto wanted = loudness::correctionDb (measured.rms, measured.peak);
+        auto wanted = loudness::correctionDb (measured.loudness, measured.peak);
 
         /*  Nothing left to confirm.
 
@@ -498,7 +498,7 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
         */
         if (wanted == 0.0f)
         {
-            auditionSummary = juce::String (measured.rms, 3) + " rms";
+            auditionSummary = juce::String (measured.loudness, 3) + " level";
             if (std::abs (totalDb) >= 1.0f)
                 auditionSummary << ", " << (totalDb > 0 ? "+" : "")
                                 << juce::String (juce::roundToInt (totalDb)) << " dB";
@@ -508,8 +508,8 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
         // Match the level by moving the patch's own master volume rather than
         // trimming our output, so the level travels with the preset when it is
         // exported.
-        const auto applied = loudness::normalise (result.preset["settings"],
-                                                  measured.rms, measured.peak);
+        const auto applied = loudness::normalisePreset (result.preset,
+                                                  measured.loudness, measured.peak);
 
         // Running out of volume range means the patch is quiet at the source,
         // not quiet at the output, and turning it up will not fix that.

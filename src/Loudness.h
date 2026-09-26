@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <string>
 
 /*
     Loudness matching for generated patches.
@@ -8,8 +9,11 @@
     Random patches land across a 23 dB range, so one candidate is inaudible and
     the next one is painful. Matching peaks does not fix this: a compressed
     patch and a transient-heavy one at the same peak are nowhere near the same
-    loudness. RMS is what the ear tracks, so that is what gets matched, with a
-    peak ceiling on top to catch anything that would clip.
+    loudness. Energy is what the ear tracks, so that is what gets matched, with
+    a peak ceiling on top to catch anything that would clip, and it is read
+    through the ear's weighting, the K curve loudness meters use, since plain
+    RMS let a bright patch sound several decibels louder than a dark one at the
+    same reading.
 
     The targets come from measuring hand-made presets out of a real library
     through the same code the plugin uses. Measuring them any other way is
@@ -26,7 +30,12 @@
 */
 namespace loudness
 {
-    inline constexpr float kTargetRms = 0.135f;    // median of hand-made presets
+    /*  Every preset at one loudness, -16 LUFS, whatever its style, so a
+        user auditioning them does not reach for the volume between two. The
+        level is the square root of the K weighted block energy, so the target
+        is 10 to the power of (-16 + 0.691) / 20. */
+    inline constexpr float kTargetLufs = -16.0f;
+    inline constexpr float kTargetRms = 0.17155f;
     inline constexpr float kPeakCeiling = 0.80f;   // p90 of hand-made presets
     inline constexpr float kMaxBoostDb = 24.0f;    // do not amplify near-silence
     inline constexpr float kMaxCutDb = -30.0f;
@@ -40,7 +49,8 @@ namespace loudness
 
     /** How much to move a patch measuring `rms` / `peak` to sit where hand-made
         presets do. Returns dB, clamped, and zero when it is already close. */
-    float correctionDb (float rms, float peak);
+    float correctionDb (float rms, float peak, float target = kTargetRms);
+
 
     /** Apply `correctionDb` to the patch's own master volume.
 
@@ -49,5 +59,8 @@ namespace loudness
         listener hears does not depend on the plugin having measured it first.
         Returns the dB actually applied after the volume parameter is clamped.
     */
-    float normalise (nlohmann::json& settings, float rms, float peak);
+    float normalise (nlohmann::json& settings, float rms, float peak, float target = kTargetRms);
+
+    /** `normalise` on a whole preset. */
+    float normalisePreset (nlohmann::json& preset, float level, float peak);
 }

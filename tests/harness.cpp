@@ -266,6 +266,7 @@ int main (int argc, char** argv)
     juce::File varyTo;
     bool historyCheck = false;
     juce::File drumsTo;
+    juce::File measureFrom;
     // Which scale the gesture demo walks. The shapes read differently on a
     // seven note maqam than on a pentatonic, and the note floor bites hardest
     // on the big scales, so it has to be possible to ask for one.
@@ -308,6 +309,7 @@ int main (int argc, char** argv)
         if (arg.startsWith ("--vary=")) varyTo = juce::File (value);
         if (arg == "--history-check") historyCheck = true;
         if (arg.startsWith ("--drums=")) drumsTo = juce::File (value);
+        if (arg.startsWith ("--measure=")) measureFrom = juce::File (value);
         if (arg.startsWith ("--gesture-scale=")) gestureScale = value;
         if (arg.startsWith ("--renders="))
         {
@@ -433,6 +435,61 @@ int main (int argc, char** argv)
         also gets its strikes counted, since the flam is the part of it most
         likely to go wrong.
     */
+    /*  The level of every preset in a folder, through the audition the
+        screen uses, both the plain reading and the weighted one. It is how
+        the target is set: the median of a hand-made library measured exactly
+        as a generated patch is. */
+    if (measureFrom != juce::File())
+    {
+        std::map<std::string, std::vector<std::pair<float, float>>> byStyle;
+        std::vector<std::pair<float, float>> every;
+        for (const auto& f : measureFrom.findChildFiles (juce::File::findFiles, true, "*.vital"))
+        {
+            nlohmann::json doc;
+            try { doc = nlohmann::json::parse (f.loadFileAsString().toStdString()); }
+            catch (...) { continue; }
+            if (! doc.contains ("settings"))
+                continue;
+            doc.erase ("tuning");
+            if (! host.applyPreset (doc))
+                continue;
+            auto style = doc.value ("preset_style", std::string ("none"));
+            if (style.empty())
+                style = "none";
+            const auto hit = style == "Percussion" || style == "Drums";
+            audition::settle (*host.processor(), kSampleRate, kBlockSize);
+            const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize, 3, 48, hit);
+            if (m.silent || m.loudness <= 1.0e-5f)
+                continue;
+            byStyle[style].push_back ({ m.rms, m.loudness });
+            every.push_back ({ m.rms, m.loudness });
+        }
+        const auto report = [] (const std::string& label, std::vector<std::pair<float, float>> v)
+        {
+            if (v.empty())
+                return;
+            std::vector<float> a, b;
+            for (const auto& p : v)
+            {
+                a.push_back (p.first);
+                b.push_back (p.second);
+            }
+            std::sort (a.begin(), a.end());
+            std::sort (b.begin(), b.end());
+            const auto at = [] (const std::vector<float>& x, int pct) { return x[(x.size() - 1) * (size_t) pct / 100]; };
+            std::cout << juce::String (label).paddedRight (' ', 14) << juce::String ((int) v.size()).paddedLeft (' ', 4)
+                      << "   plain " << juce::String (at (a, 50), 4) << " (" << juce::String (at (a, 10), 4)
+                      << " to " << juce::String (at (a, 90), 4) << ")"
+                      << "   weighted " << juce::String (at (b, 50), 4) << " (" << juce::String (at (b, 10), 4)
+                      << " to " << juce::String (at (b, 90), 4) << ")" << std::endl;
+        };
+        std::cout << "style            n   level, median (p10 to p90)" << std::endl;
+        report ("all", every);
+        for (const auto& [style, v] : byStyle)
+            report (style, v);
+        return 0;
+    }
+
     if (drumsTo != juce::File())
     {
         auto init = host.currentPreset();
@@ -475,7 +532,7 @@ int main (int argc, char** argv)
                 audition::settle (*host.processor(), kSampleRate, kBlockSize);
                 const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize,
                                                            3, 48, true);
-                loudness::normalise (result.preset["settings"], m.rms, m.peak);
+                loudness::normalisePreset (result.preset, m.loudness, m.peak);
 
                 juce::String extra;
                 if (k.flam && host.applyPreset (result.preset))
@@ -591,7 +648,7 @@ int main (int argc, char** argv)
                     return false;
                 audition::settle (*host.processor(), kSampleRate, kBlockSize);
                 const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-                loudness::normalise (r.preset["settings"], m.rms, m.peak);
+                loudness::normalisePreset (r.preset, m.loudness, m.peak);
                 return true;
             };
             const auto record = [] (const gen::Request& req, const gen::Result& r)
@@ -776,7 +833,7 @@ int main (int argc, char** argv)
                     continue;
                 audition::settle (*host.processor(), kSampleRate, kBlockSize);
                 const auto m0 = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-                loudness::normalise (original.preset["settings"], m0.rms, m0.peak);
+                loudness::normalisePreset (original.preset, m0.loudness, m0.peak);
 
                 const nlohmann::json base = original.preset;
                 const auto ref = takes (base);
@@ -833,7 +890,7 @@ int main (int argc, char** argv)
                         return from;
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
                     const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-                    loudness::normalise (result.preset["settings"], m.rms, m.peak);
+                    loudness::normalisePreset (result.preset, m.loudness, m.peak);
                     return result.preset;
                 };
 
@@ -897,7 +954,7 @@ int main (int argc, char** argv)
                     continue;
                 audition::settle (*host.processor(), kSampleRate, kBlockSize);
                 const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-                loudness::normalise (result.preset["settings"], m.rms, m.peak);
+                loudness::normalisePreset (result.preset, m.loudness, m.peak);
 
                 auto out = result.preset;
                 out.erase ("tuning");
@@ -958,7 +1015,7 @@ int main (int argc, char** argv)
                         continue;
                     audition::settle (*host.processor(), kSampleRate, kBlockSize);
                     const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-                    loudness::normalise (result.preset["settings"], m.rms, m.peak);
+                    loudness::normalisePreset (result.preset, m.loudness, m.peak);
 
                     const auto label = juce::String (juce::roundToInt (dirt * 100.0f)).paddedLeft ('0', 3);
                     auto out = result.preset;
@@ -1033,7 +1090,7 @@ int main (int argc, char** argv)
             host.applyPreset (result.preset);
             audition::settle (*host.processor(), kSampleRate, kBlockSize);
             const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-            loudness::normalise (result.preset["settings"], m.rms, m.peak);
+            loudness::normalisePreset (result.preset, m.loudness, m.peak);
 
             auto out = result.preset;
             out.erase ("tuning");
@@ -1073,7 +1130,7 @@ int main (int argc, char** argv)
             host.applyPreset (result.preset);
             audition::settle (*host.processor(), kSampleRate, kBlockSize);
             const auto m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-            loudness::normalise (result.preset["settings"], m.rms, m.peak);
+            loudness::normalisePreset (result.preset, m.loudness, m.peak);
 
             /*  The LFO named itself while it was built, so which phrases it
                 chose is readable off the patch rather than worked out from its
@@ -1176,7 +1233,7 @@ int main (int argc, char** argv)
             host.applyPreset (result.preset);
             audition::settle (*host.processor(), kSampleRate, kBlockSize);
             m = audition::auditionAveraged (*host.processor(), kSampleRate, kBlockSize);
-            loudness::normalise (result.preset["settings"], m.rms, m.peak);
+            loudness::normalisePreset (result.preset, m.loudness, m.peak);
 
             auto out = result.preset;
             out.erase ("tuning");
@@ -1653,7 +1710,7 @@ int main (int argc, char** argv)
                                 whether they were bright.
                             */
                             auto levelled = result.preset;
-                            loudness::normalise (levelled["settings"], m.rms, m.peak);
+                            loudness::normalisePreset (levelled, m.loudness, m.peak);
 
                             // Named with the reading and the ceiling it missed,
                             // so a listen and the number are side by side.
@@ -1703,7 +1760,7 @@ int main (int argc, char** argv)
                         {
                             rejectsTo.createDirectory();
                             auto levelled = result.preset;
-                            loudness::normalise (levelled["settings"], m.rms, m.peak);
+                            loudness::normalisePreset (levelled, m.loudness, m.peak);
                             const auto name = style + "_" + juce::String (why).replace (" ", "")
                                 + "_off" + juce::String ((int) (100.0f * pitchError))
                                 + "_sal" + juce::String ((int) (100.0f * salience))
@@ -1713,7 +1770,7 @@ int main (int argc, char** argv)
                         break;
                     }
 
-                    auto wanted = loudness::correctionDb (m.rms, m.peak);
+                    auto wanted = loudness::correctionDb (m.loudness, m.peak);
                     asked.push_back (wanted);
 
                     // The reading is already three renders averaged, so there is
@@ -1726,8 +1783,8 @@ int main (int argc, char** argv)
                         break;
                     }
 
-                    const auto got = loudness::normalise (result.preset["settings"],
-                                                          m.rms, m.peak);
+                    const auto got = loudness::normalisePreset (result.preset,
+                                                          m.loudness, m.peak);
                     if (std::abs (wanted - got) > 6.0f)
                     {
                         exhausted = false;
@@ -1785,7 +1842,7 @@ int main (int argc, char** argv)
                 second window and its mean says so, which makes a perfectly
                 reasonable patch look broken.
             */
-            levels.push_back (accepted_m.rms);
+            levels.push_back (accepted_m.loudness);
             styleCentroid[style].push_back (accepted_m.centroidHz);
             styleSustain[style].push_back (
                 (float) result.preset["settings"].value ("env_1_sustain", 0.0));
@@ -1861,23 +1918,23 @@ int main (int argc, char** argv)
         std::cout << " (" << (int) std::round (100.0 * pass / total) << "%)";
     std::cout << "\n";
 
-    /*  Loudness consistency is the number that matters here. Hand-made presets
-        from a real library sit at a median of 0.135 on this metric. Landing near
-        that, and tighter than their spread, is the difference between a
-        batch you can audition and the "some are far too loud, some barely
-        audible" problem the screen exists to solve.
+    /*  Loudness consistency is the number that matters here. Every preset is
+        levelled to -16 LUFS, whatever its style, and landing tightly on it is
+        the difference between a batch you can audition and the "some are far
+        too loud, some barely audible" problem the screen exists to solve.
     */
     if (levels.size() > 4)
     {
         std::sort (levels.begin(), levels.end());
         const auto p10 = levels[levels.size() / 10];
         const auto p90 = levels[levels.size() * 9 / 10];
-        std::cout << "\nlevel: median rms " << juce::String (levels[levels.size() / 2], 4)
+        std::cout << "\nlevel: median " << juce::String (levels[levels.size() / 2], 4)
                   << "   p10 " << juce::String (p10, 4)
                   << "   p90 " << juce::String (p90, 4)
                   << "   spread "
                   << juce::String (20.0f * std::log10 (p90 / juce::jmax (p10, 1.0e-6f)), 1)
-                  << " dB      (hand-made presets: median 0.1346, p10 0.0126, p90 0.2858)\n";
+                  << " dB      (target " << juce::String (loudness::kTargetRms, 4) << ", which is "
+                  << juce::String (loudness::kTargetLufs, 1) << " LUFS)\n";
     }
     /*  Reported with the same code that screens, so the numbers mean the same
         thing the generator was aiming at. Measuring in a second host gives

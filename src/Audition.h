@@ -26,6 +26,16 @@ namespace audition
     struct Measurement
     {
         float rms = 0.0f;           // 90th percentile short-term level
+        /*  Loudness as a meter reads it, ITU-R BS.1770: the K weighting, a
+            shelf of about 4 dB above 1.7 kHz where hearing is most sensitive
+            and a high pass under 40 Hz, over 400 ms blocks, gated, across the
+            held note, or a hit's loudest block. Stored as the square root of
+            the block energy, so LUFS is -0.691 + 20 log10 of it. This is what
+            a patch is levelled on. Plain RMS set every patch to the same
+            energy, and in LUFS the bright ones came out louder: leads 6 dB
+            above hand-made leads, keys 8 dB above, basses 2 dB under. The
+            plain reading stays for the checks tuned on it. */
+        float loudness = 0.0f;
         float meanRms = 0.0f;       // plain average, for reference
         float peak = 0.0f;
         float sustainRms = 0.0f;    // energy while the note is held

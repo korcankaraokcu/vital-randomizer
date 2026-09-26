@@ -1255,6 +1255,38 @@ It is drawn back in where BRIGHT asks now, and drums agree 90% of the time with 
 median move of 139 Hz. The rest of the gap is the kinds that are mostly sample
 now, the cymbals, timpani and cowbell, where the filter has less to shape.
 
+## Level, read the way it is heard
+
+Every patch was levelled to the same RMS, the median of the hand-made library.
+Measured in LUFS, the broadcast loudness standard, the batch as a whole sat
+where the library does, -18.5 against -19.1, but not style by style: leads 6 dB
+above hand-made leads, keys 8 dB above, basses 2 dB under, and among the drums
+the long bright cymbals and shakers 10 dB above the short hats and rims. Plain
+RMS counts every frequency alike and the ear does not, so at one reading a
+bright patch sounds louder than a dark one.
+
+The audition now reads loudness the way a meter does, ITU-R BS.1770: the K
+weighting, a shelf of about 4 dB above 1.7 kHz and a high pass under 40 Hz, over
+400 ms blocks in 100 ms steps, gated at -70 LUFS and then 10 LU under the
+average, across the held note, or a hit's loudest block. Every preset is
+levelled to -16 LUFS, whatever its style, so someone auditioning them does not
+reach for the volume between two. The plain reading stays for the checks tuned
+on it, silence, a click with nothing held, crest.
+
+A target per style was tried first. The library, measured through the same
+audition with `vrtest --measure=<dir>`, is not equally loud by style, basses
+about 3 dB above its middle and keys about 5 under, the way a sound designer
+leaves them for a mix. Presets from one source are better at one level, so that
+was dropped.
+
+Measured from outside, rendered through a separate Vital and metered in LUFS,
+a batch of 200 and the 48 demo drums sit at a median of -16.1, 80% of them
+between -17.9 and -15.2, and every style's median between -15.8 and -16.4. The
+loudest are about -13. The quietest are the shortest hits, rims and closed hats
+at -23 to -27: a meter averages over 400 ms, so a click of 50 ms would need about
+10 dB more to read -16 and its peak would clip, which the peak ceiling prevents.
+Every style screens 100%.
+
 ## Three renders, and why it is not two
 
 Every check now runs on three renders averaged rather than one, because Vital

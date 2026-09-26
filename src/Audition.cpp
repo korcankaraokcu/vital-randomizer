@@ -7,6 +7,50 @@
 #include <algorithm>
 #include <vector>
 
+namespace
+{
+    /*  One section of the K weighting, a biquad from the published design
+        values, so it holds at any sample rate. */
+    struct Biquad
+    {
+        double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
+
+        static Biquad shelf (double fs)
+        {
+            const double G = 3.999843853973347, Q = 0.7071752369554196, fc = 1681.974450955533;
+            const auto A = std::pow (10.0, G / 40.0), w = 2.0 * juce::MathConstants<double>::pi * fc / fs;
+            const auto a = std::sin (w) / (2.0 * Q), c = std::cos (w), r = 2.0 * std::sqrt (A) * a;
+            const auto a0 = (A + 1) - (A - 1) * c + r;
+            Biquad q;
+            q.b0 = A * ((A + 1) + (A - 1) * c + r) / a0;
+            q.b1 = -2 * A * ((A - 1) + (A + 1) * c) / a0;
+            q.b2 = A * ((A + 1) + (A - 1) * c - r) / a0;
+            q.a1 = 2 * ((A - 1) - (A + 1) * c) / a0;
+            q.a2 = ((A + 1) - (A - 1) * c - r) / a0;
+            return q;
+        }
+
+        static Biquad highPass (double fs)
+        {
+            const double Q = 0.5003270373238773, fc = 38.13547087602444;
+            const auto w = 2.0 * juce::MathConstants<double>::pi * fc / fs;
+            const auto a = std::sin (w) / (2.0 * Q), c = std::cos (w), a0 = 1 + a;
+            Biquad q;
+            q.b0 = (1 + c) / 2 / a0; q.b1 = -(1 + c) / a0; q.b2 = (1 + c) / 2 / a0;
+            q.a1 = -2 * c / a0; q.a2 = (1 - a) / a0;
+            return q;
+        }
+
+        double operator() (double x)
+        {
+            const auto y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
+        }
+    };
+}
+
 namespace audition
 {
     namespace
@@ -58,7 +102,7 @@ namespace audition
         Measurement sum;
         int votes[5] = { 0, 0, 0, 0, 0 };   // silent, clipping, clickOnly, peaky, lopsided
         int counted = 0;
-        float firstRms = 0.0f, lastRms = 0.0f, loudestRms = 0.0f, loudestPeak = 0.0f;
+        float firstRms = 0.0f, lastRms = 0.0f, loudestRms = 0.0f, loudestPeak = 0.0f, loudestHeard = 0.0f;
 
         for (int i = 0; i < times; ++i)
         {
@@ -67,6 +111,7 @@ namespace audition
                 firstRms = m.rms;
             lastRms = m.rms;
             loudestRms = juce::jmax (loudestRms, m.rms);
+            loudestHeard = juce::jmax (loudestHeard, m.loudness);
             loudestPeak = juce::jmax (loudestPeak, m.peak);
 
             if (i == 0)
@@ -74,6 +119,7 @@ namespace audition
             else
             {
                 sum.rms += m.rms;           sum.peak += m.peak;
+                sum.loudness += m.loudness;
                 sum.sustainRms += m.sustainRms; sum.tailRms += m.tailRms;
                 sum.motion += m.motion;     sum.crestDb += m.crestDb;
                 sum.balanceDb += m.balanceDb; sum.centroidHz += m.centroidHz;
@@ -101,7 +147,7 @@ namespace audition
         if (counted > 1)
         {
             const auto n = (float) counted;
-            for (auto* v : { &sum.rms, &sum.peak, &sum.sustainRms, &sum.tailRms,
+            for (auto* v : { &sum.rms, &sum.loudness, &sum.peak, &sum.sustainRms, &sum.tailRms,
                              &sum.motion, &sum.crestDb, &sum.balanceDb, &sum.centroidHz,
                              &sum.lowRatio, &sum.highSpike, &sum.spectralMotion,
                              &sum.heldRatio, &sum.pitchHz, &sum.pitchSalience,
@@ -127,6 +173,7 @@ namespace audition
         if (sum.climbing)
         {
             sum.rms = loudestRms;
+            sum.loudness = loudestHeard;
             sum.peak = loudestPeak;
         }
 
@@ -339,6 +386,15 @@ namespace audition
         std::vector<float> windows;
         double channelSq[2] = { 0.0, 0.0 };
         double windowSq = 0.0;
+        // Loudness as ITU-R BS.1770 reads it: the K weighted energy summed
+        // over the channels, in 100 ms steps that make 400 ms blocks.
+        std::vector<double> steps;
+        std::vector<int> stepEnds;
+        double stepSq = 0.0;
+        int stepSamples = 0, blocksInStep = 0;
+        const auto stepBlocks = juce::jmax (1, (int) (0.1 * sampleRate) / blockSize);
+        Biquad shelf[2] = { Biquad::shelf (sampleRate), Biquad::shelf (sampleRate) };
+        Biquad highPass[2] = { Biquad::highPass (sampleRate), Biquad::highPass (sampleRate) };
         int windowSamples = 0, blocksInWindow = 0;
 
         for (int pos = 0; pos < totalSamples; pos += blockSize)
@@ -355,7 +411,7 @@ namespace audition
 
             synth.processBlock (block, midi);
 
-            double blockSq = 0.0;
+            double blockSq = 0.0, heardSq = 0.0;
             for (int ch = 0; ch < block.getNumChannels(); ++ch)
             {
                 m.peak = juce::jmax (m.peak, block.getMagnitude (ch, 0, n));
@@ -365,7 +421,14 @@ namespace audition
                     chSq += (double) d[i] * d[i];
                 blockSq += chSq;
                 if (ch < 2)
+                {
                     channelSq[(size_t) ch] += chSq;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const auto k = highPass[ch] (shelf[ch] ((double) d[i]));
+                        heardSq += k * k;
+                    }
+                }
 
                 const auto* held = block.getReadPointer (ch);
                 for (int i = 0; i < n; ++i)
@@ -404,6 +467,17 @@ namespace audition
                 blocksInWindow = 0;
             }
 
+            stepSq += heardSq;
+            stepSamples += n;
+            if (++blocksInStep >= stepBlocks)
+            {
+                steps.push_back (stepSq / juce::jmax (1, stepSamples));
+                stepEnds.push_back (pos + n);
+                stepSq = 0.0;
+                stepSamples = 0;
+                blocksInStep = 0;
+            }
+
             if (pos >= sustainStart && pos < noteOffSample)
             {
                 sustainSq += blockSq;
@@ -433,6 +507,51 @@ namespace audition
             std::sort (sorted.begin(), sorted.end());
             // A hit is as loud as its loudest moment, which is most of it.
             m.rms = hit ? sorted.back() : sorted[(size_t) ((sorted.size() - 1) * 9 / 10)];
+            /*  The loudness, gated as the standard gates a programme, over the
+                held part of the note: blocks under -70 LUFS are dropped, then
+                any more than 10 LU under the average of the rest. A hit has no
+                held part, so it is its loudest block. Kept as the square root
+                of the block energy, so a level is -0.691 + 20 log10 of it in
+                LUFS and every correction works in decibels as before. */
+            std::vector<double> blocks, held;
+            for (size_t j = 0; j + 3 < steps.size(); ++j)
+            {
+                const auto e = (steps[j] + steps[j + 1] + steps[j + 2] + steps[j + 3]) / 4.0;
+                blocks.push_back (e);
+                if (stepEnds[j + 3] <= noteOffSample + blockSize)
+                    held.push_back (e);
+            }
+            const auto lufs = [] (double e) { return -0.691 + 10.0 * std::log10 (e + 1.0e-12); };
+            if (hit || held.empty())
+                held = blocks;
+            if (! held.empty())
+            {
+                double level = 0.0;
+                if (hit)
+                    level = *std::max_element (held.begin(), held.end());
+                else
+                {
+                    std::vector<double> kept;
+                    for (const auto e : held)
+                        if (lufs (e) > -70.0)
+                            kept.push_back (e);
+                    double mean = 0.0;
+                    for (const auto e : kept)
+                        mean += e;
+                    mean = kept.empty() ? 0.0 : mean / (double) kept.size();
+                    const auto floor = lufs (mean) - 10.0;
+                    double gated = 0.0;
+                    int count = 0;
+                    for (const auto e : kept)
+                        if (lufs (e) > floor)
+                        {
+                            gated += e;
+                            ++count;
+                        }
+                    level = count > 0 ? gated / count : mean;
+                }
+                m.loudness = (float) std::sqrt (level);
+            }
         }
         else
         {
