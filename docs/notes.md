@@ -1157,6 +1157,104 @@ away. History is the candidates being chosen between rather than an undo stack,
 and nothing depends on where an entry sits, so only the limit removes anything
 now. The same check covers it.
 
+## Effects that were never used fully
+
+The DIRT work found every patch on one distortion circuit. An audit of 200 rolls
+against the 299 hand-made presets in the library, parameter by parameter, found
+the same thing across the effects, and one knob that did nothing at all.
+
+**The spectral morph was dead.** Every patch had its morph type at the first,
+which is none. On a patch stripped to one oscillator, moving the amount from
+nothing to full changed the spectrum by 0.00 dB at that type and by 16 to 77 dB
+at any other. So the amount the axes drew, BRIGHT's lever on it, the MORPH
+macros and every LFO wired there did nothing, the same fault the oscillator warp
+had. Hand-made presets use a type 43% of the time.
+
+Each type was measured at no, half and full amount. Low pass, formant scale and
+harmonic stretch brighten steadily as the amount rises, which is what BRIGHT's
+lever assumes, and keep the note. Skew and phase disperse colour the tone and
+keep the note. Smear and high pass go silent at full, random amplitudes turns
+to noise, shepard tone moves the pitch and inharmonic stretch leaves the
+harmonic series, so those are for SFX and Experiment only, kept where they
+still sound. Vocode keeps the note but swings the level by up to 12 dB across
+its range, and once an LFO on the morph was live, struck keys swelled back up
+after the strike: Keys rejected for a note that kept going rose from 5 in 25 to
+11. It is left to SFX and Experiment too, and formant scale and harmonic stretch
+keep to the middle of their range, where the level holds.
+
+A type is drawn on a quarter of oscillators at the bottom of COMPLEX and three
+fifths at the top. SFX and Experiment always morph their first oscillator, since
+their archetypes wire a random source to it, and drums keep none. The amount the
+axes drew is kept, only brought inside the type's safe range. A morph with no
+type now counts as a dead destination, so no macro and no LFO lands on it.
+
+**The effects' modes are drawn.** Each of these was one value in all 200 rolls:
+
+| | Hand-made | Before | Now |
+|---|---|---|---|
+| Delay style | ping-pong 38%, mono 31%, stereo 20%, mid ping-pong 11% | mono | 40, 32, 20, 8% |
+| Delay dotted | 17% | never | 15% |
+| Filter slope, the second | 28 to 36% | never | 30 to 41% |
+| EQ low band as a low cut | 47% | never | 25%, never on a bass or a drum |
+
+The low cut sits between 50 and 110 Hz. The filter slope is drawn only on the
+classic models, since the formant, comb and phaser models read the style as
+something else, and a drum's filter is its kind's.
+
+The chorus's voice count was drawn as well, one to three voices a third of the
+time, and taken back out. Fully wet on a held pad, one to four voices measured
+the same width and shimmer, and by ear the thinner ones were not clearly a
+chorus. There was no sound it was drawn for beyond matching a library, and four
+is the full ensemble the effect is there for.
+
+**Two rules from listening.** A held note should not leap into a loud, high,
+sudden change of tone, and a struck note should not echo on long after it.
+
+Leads that did the first had several LFOs and random sources stacked on one
+control. On the filter cutoff they reached 0.9 to 1.2 of its range, 120 to 150
+semitones of swing, where the patches heard as musical had 0.21 to 0.26, and
+the worst jumps of all, 20 to 26 dB above 3 kHz within 150 ms, had 0.4 to 1.6
+of an LFO sweeping a filter's resonance, a peak that suddenly screams. So the
+cyclic modulation on each tone control is capped as a sum: 0.30 of a cutoff's
+range, 0.20 of a resonance, 0.40 of an oscillator's warp and 0.60 of a morph or
+wave frame, every routing on an over-full control shrinking by the same factor
+so the motion keeps its shape. Envelopes and macros are left alone, since a
+sweep that happens once is a pluck. Measured on held notes, leads that rose
+more than 8 dB above 3 kHz within 150 ms went from 13% to none, keys stayed at
+none and pads went to 7%.
+
+Fixed caps held MOVE's two ends to the same reach and took it back from 77% to
+73%, so they follow MOVE, as they are at its middle and up to 40% wider or
+narrower at its ends, and drums are left out, since a hit is not held. MOVE
+reads 75%.
+
+A delay that dropped only 3.3 dB an echo, at a feedback of 0.68, lingered for
+twelve echoes and five seconds, where one dropping 8 dB an echo was heard as
+fading fast enough. Feedback stops at 0.45, at least 7 dB an echo, and lower on
+a long delay time, so the echoes are 40 dB down within about three and a half
+seconds: a dotted quarter keeps about 0.37. SPACE still reads 94%.
+
+SFX and Experiment are exempt from both, since unplaceable is their job and the
+wild ones were liked. The patches that were singled out as good are kept in
+`out/liked`, since a batch rewrites `out/`.
+
+**What is left as it was.** The distortion's own filter, the FX filter, the
+order of the effect chain and the compressor's settings are still the init
+patch's. Hand-made presets move all of them, but each changes a sound enough to
+need listening rather than a proportion copied from a library: a filter after
+the distortion at its default is a low pass at 830 Hz, and the compressor was
+the rumble under every drum. BRIGHT keeps a lever on the FX filter's cutoff,
+which does nothing while that filter is off.
+
+**BRIGHT on drums.** The audit's axis check found BRIGHT agreeing with itself on
+only 55% of drums, moving them by a median of 5 Hz, a regression from the drum
+work rather than from anything here. A kind holds its cutoff inside its band,
+and one pushed outside was drawn back in at random, which did not know which
+way BRIGHT had pushed, so a seed built dark and bright landed in the same place.
+It is drawn back in where BRIGHT asks now, and drums agree 90% of the time with a
+median move of 139 Hz. The rest of the gap is the kinds that are mostly sample
+now, the cymbals, timpani and cowbell, where the filter has less to shape.
+
 ## Three renders, and why it is not two
 
 Every check now runs on three renders averaged rather than one, because Vital

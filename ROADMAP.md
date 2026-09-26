@@ -10,13 +10,21 @@ Agreement by axis, `vrtest --axis=<key> --trials=40`, about 315 pairs each:
 
 | BRIGHT | SPACE | DIRT | MOVE |
 |---|---|---|---|
-| 99% | 94% | 81% | 73% |
+| 97% | 94% | 81% | 75% |
+
+BRIGHT, SPACE and MOVE were measured again after the spectral morph was given a
+type, the effects their modes, and the cyclic modulation on tone controls and
+the delay's feedback caps from listening. DIRT is from before that. MOVE rose
+from 73% to 77% with the morph, most where a dead morph had been wired in, and
+settled at 75% with the caps, which follow the slider. BRIGHT eased from 99%, Keys, Lead and
+Sequence reading 95 to 97% with the second filter slope and the morph types in
+play, and Percussion at 90% after a regression to 55% was found and fixed.
 
 MOVE by style, scored on how far the centroid wanders:
 
-| Bass | Percussion | Lead | Experiment | Pad | Keys | SFX | Sequence |
+| SFX | Bass | Percussion | Experiment | Lead | Pad | Keys | Sequence |
 |---|---|---|---|---|---|---|---|
-| 86% | 77% | 75% | 74% | 72% | 69% | 67% | 65% |
+| 87% | 85% | 77% | 76% | 72% | 72% | 67% | 67% |
 
 SFX read 85% on the run before this one with its patches unchanged, byte for
 byte. Its patches are the most random there are, Vital's random generator is
@@ -30,10 +38,11 @@ a crash each move in their own way and no longer blur into one generic hit.
 
 It has had two rounds already, which are in the notes: the metric moved from the
 envelope to tone motion, and MOVE started scaling how far its modulation
-reaches as well as how fast. Nothing has been tried on the axis since, and the
-lowest styles are the ones whose motion is least about tone: Sequence moves in
-pitch, which the centroid barely sees, and Keys are short enough that there is
-little held note for anything to wander in. That points at the metric before the
+reaches as well as how fast. A third, the spectral morph given a type so the
+LFOs wired to it do something, lifted it from 73% to 77%, and capping how far
+cyclic sources may swing a tone control, a rule from listening, gave two of
+that back. The lowest styles are Keys, short enough that there is little held
+note for anything to wander in, and Sequence, which moves in pitch. That points at the metric before the
 axis, which is the order DIRT turned out to need as well.
 
 There is a lead on the axis itself too, found while giving VARY the LFO rates.

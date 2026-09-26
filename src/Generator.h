@@ -130,6 +130,16 @@ namespace gen
         void varyMotion (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Give oscillators a warp type, more often the higher COMPLEX is. */
         void chooseWarp (const Request& r, nlohmann::json& settings, unsigned int seed);
+        /** Give oscillators a spectral morph type, so the morph amount does
+            something, and keep the amount where that type is safe. */
+        void chooseMorph (const Request& r, nlohmann::json& settings, unsigned int seed);
+        /** The effects' own modes, which nothing else draws: the delay's
+            style and timing, the chorus's voices, the filters' slope and the
+            EQ's low band. */
+        void chooseEffectModes (const Request& r, nlohmann::json& settings, unsigned int seed);
+        /** Keep what LFOs and random sources do to the tone gentle, and a
+            delay's echoes from outlasting the note by much. */
+        void keepMotionAndEchoesInHand (const Request& r, nlohmann::json& settings);
         /** Hold a drum to the bands of its kind, after everything else. */
         void shapeDrum (const Request& r, nlohmann::json& settings, unsigned int seed);
         /** Switch the distortion on or off from DIRT, before the wiring. */

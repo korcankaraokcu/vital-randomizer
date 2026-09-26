@@ -194,6 +194,16 @@ namespace gen
                 is the first one, which does nothing, and most patches sit
                 there. A macro wired to it used to be exactly that.
             */
+            /*  The same for the spectral morph, whose first type is none at
+                all: the amount, and anything wired to it, does nothing, and
+                every patch sat there until the type was drawn. */
+            const std::string morph = "_spectral_morph_amount";
+            if (dest.size() > morph.size()
+                && dest.compare (dest.size() - morph.size(), morph.size(), morph) == 0
+                && dest.rfind ("osc_", 0) == 0
+                && settings.value (dest.substr (0, dest.size() - morph.size()) + "_spectral_morph_type", 0.0) < 0.5)
+                return false;
+
             const std::string warp = "_distortion_amount";
             if (dest.size() > warp.size()
                 && dest.compare (dest.size() - warp.size(), warp.size(), warp) == 0
@@ -1263,9 +1273,19 @@ namespace gen
             constexpr double kLowest = 28.0, kHighest = 130.0;
             auto offset = standing();
             const auto heard = settings.value ("filter_1_cutoff", 0.0) + offset;
+            /*  Drawn back inside the band where BRIGHT asks, not at random.
+                A random place in the band did not know which way BRIGHT had
+                pushed, so a seed built dark and bright landed in the same
+                spot, and BRIGHT moved a drum by a median of 5 Hz and agreed
+                with itself on a coin toss. */
             auto target = heard;
             if (heard < kind->cutoff.low || heard > kind->cutoff.high)
-                target = draw ("filter_1_cutoff", kind->cutoff);
+            {
+                const auto bright = r.sliders.count ("bright") > 0 ? r.sliders.at ("bright") : 0.5f;
+                const auto place = juce::jlimit (0.0f, 1.0f, 0.1f + 0.8f * bright
+                                                              + draw ("filter_1_cutoff", { -0.1f, 0.1f }));
+                target = kind->cutoff.low + place * (kind->cutoff.high - kind->cutoff.low);
+            }
 
             // More than the knob can take up: the routings give way instead.
             if (target - offset < kLowest && offset > 0.0 && modFree)
@@ -1498,6 +1518,284 @@ namespace gen
             {
                 settings[osc + "_distortion_type"] = 0.0;
             }
+        }
+    }
+
+    void Generator::chooseMorph (const Request& r, nlohmann::json& settings, unsigned int seed)
+    {
+        /*  The spectral morph, which every patch had at its first type.
+
+            Vital's first morph type is none at all. Measured on a patch
+            stripped to one oscillator, moving the amount from nothing to full
+            changed the spectrum by 0.00 dB at that type and by 16 to 77 dB at
+            any other. So the amount the axes drew, BRIGHT's lever on it, the
+            MORPH macros and every LFO wired there did nothing, the same fault
+            the oscillator warp had. Hand-made presets use a type 43% of the
+            time.
+
+            The types were measured the same way, at no, half and full amount:
+            -   Low pass, formant scale and harmonic stretch brighten steadily
+                as the amount rises, which is what BRIGHT's lever assumes, and
+                keep the note. Formant and harmonic stretch are unchanged at
+                half, low pass at full.
+            -   Vocode, skew and phase disperse colour the tone and keep the
+                note, without much change in brightness, though vocode moves
+                the level a lot.
+            -   Smear and high pass go silent at full, random amplitudes turns
+                to noise and loses the note, shepard tone moves the pitch, and
+                inharmonic stretch leaves the harmonic series. Those are for
+                SFX and Experiment only, and kept in the part of their range
+                that still sounds.
+
+            A type is drawn on a quarter of oscillators at the bottom of
+            COMPLEX and three fifths at the top, about the library's 43% at the
+            middle. SFX and Experiment always morph their first oscillator,
+            since their archetypes wire a random source to it. Drums keep
+            none: their kinds hold their bodies' spectra themselves. The amount
+            the axes drew is kept, only brought inside the type's safe range.
+            Chosen before the wiring, so a macro only lands on a morph that is
+            doing something.
+        */
+        if (r.base != nullptr || r.locks.count (schema::Section::osc) > 0 || r.style == "Percussion")
+            return;
+
+        const auto complexity = r.sliders.count ("complexity") > 0
+                                    ? r.sliders.at ("complexity") : 0.5f;
+        const auto chance = 0.25f + 0.35f * complexity;
+        const auto wild = r.style == "SFX" || r.style == "Experiment";
+
+        struct Kind { int type; float weight, low, high; };
+        // Pitched styles: what brightens with the amount, and some colour.
+        /*  And whose level holds while the amount moves, since an LFO on it
+            is now live. Vocode swung a note's level by up to 12 dB across its
+            range, which made struck keys swell again after the strike: Keys
+            rejected for a note that kept going rose from 5 in 25 to 11. It is
+            left to SFX and Experiment. Formant scale and harmonic stretch swing
+            3 to 6 dB near their ends, so they keep to the middle, and low
+            pass, the steadiest, is the likeliest. */
+        static const Kind tame[] = {
+            { 7, 4.0f, 0.35f, 1.00f },    // low pass
+            { 2, 2.0f, 0.30f, 0.65f },    // formant scale
+            { 3, 2.0f, 0.35f, 0.70f },    // harmonic stretch, out of tune past 0.8
+            { 11, 1.0f, 0.00f, 1.00f },   // skew
+            { 9, 1.0f, 0.00f, 1.00f },    // phase disperse
+        };
+        static const Kind anything[] = {
+            { 1, 1.0f, 0.00f, 1.00f }, { 2, 1.0f, 0.10f, 0.95f }, { 3, 1.0f, 0.10f, 0.90f },
+            { 4, 1.0f, 0.00f, 1.00f }, { 5, 1.0f, 0.00f, 0.60f }, { 6, 1.0f, 0.00f, 0.40f },
+            { 7, 1.0f, 0.25f, 1.00f }, { 8, 1.0f, 0.00f, 0.35f }, { 9, 1.0f, 0.00f, 1.00f },
+            { 10, 1.0f, 0.00f, 1.00f }, { 11, 1.0f, 0.00f, 1.00f },
+        };
+
+        for (int n = 1; n <= 3; ++n)
+        {
+            const auto osc = "osc_" + std::to_string (n);
+            const auto typeKey = osc + "_spectral_morph_type";
+            const auto amountKey = osc + "_spectral_morph_amount";
+            if (settings.value (osc + "_on", 0.0) < 0.5 || ! settings.contains (typeKey))
+                continue;
+
+            auto own = streamFor (seed, typeKey, 0x5EC7u);
+            const auto roll = uniform (own);
+            const auto pickAt = uniform (own);
+            const auto forced = wild && n == 1;
+            if (roll >= chance && ! forced)
+            {
+                settings[typeKey] = 0.0;
+                continue;
+            }
+
+            const auto* list = wild ? anything : tame;
+            const auto count = wild ? std::size (anything) : std::size (tame);
+            float total = 0.0f;
+            for (size_t i = 0; i < count; ++i)
+                total += list[i].weight;
+            auto at = pickAt * total;
+            const Kind* chosen = &list[count - 1];
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (at < list[i].weight)
+                {
+                    chosen = &list[i];
+                    break;
+                }
+                at -= list[i].weight;
+            }
+
+            settings[typeKey] = (double) chosen->type;
+            const auto amount = settings.value (amountKey, 0.5);
+            settings[amountKey] = juce::jlimit ((double) chosen->low, (double) chosen->high, amount);
+        }
+    }
+
+    void Generator::chooseEffectModes (const Request& r, nlohmann::json& settings, unsigned int seed)
+    {
+        /*  The effects' modes, which nothing drew.
+
+            The DIRT work found every patch on one distortion circuit. An audit
+            of 200 rolls against the 299 hand-made presets in the library found
+            the same across the effects: the delay always mono, where hand-made
+            ones are ping-pong 38% of the time, stereo 20% and mid ping-pong
+            11%, always on a straight eighth where 17% are dotted, the chorus
+            always four voices where a third use one to three (which stays
+            as it was, below), both filters
+            always on their first slope where a third use the second, and the
+            EQ's low band always a shelf where nearly half are a low cut. Each
+            is drawn here in about the library's proportions, on a fresh roll.
+
+            Two are kept from styles they would hurt. A low cut is never put on
+            a bass or a drum, and a drum's filter slope is its kind's. The low
+            cut sits between 50 and 110 Hz, where hand-made ones clean up under
+            a sound rather than thin it.
+        */
+        if (r.base != nullptr)
+            return;
+
+        const auto pickFrom = [&] (const std::string& key, std::initializer_list<std::pair<double, float>> table)
+        {
+            auto own = streamFor (seed, key, 0xEF0Du);
+            auto at = uniform (own);
+            for (const auto& [value, share] : table)
+            {
+                if (at < share)
+                    return value;
+                at -= share;
+            }
+            return table.begin()->first;
+        };
+
+        if (r.locks.count (schema::Section::fx) == 0)
+        {
+            if (settings.contains ("delay_style"))
+                settings["delay_style"] = pickFrom ("delay_style", { { 2.0, 0.38f }, { 0.0, 0.31f }, { 1.0, 0.20f }, { 3.0, 0.11f } });
+            if (settings.contains ("delay_sync") && settings.value ("delay_sync", 1.0) >= 0.5)
+                settings["delay_sync"] = pickFrom ("delay_sync", { { 1.0, 0.82f }, { 2.0, 0.18f } });
+            if (settings.contains ("delay_tempo"))
+                settings["delay_tempo"] = pickFrom ("delay_tempo", { { 9.0, 0.72f }, { 8.0, 0.19f }, { 10.0, 0.09f } });
+            /*  The chorus keeps its four voices. Drawn to the library's
+                proportions, one to three voices measured the same width and
+                the same shimmer as four, fully wet on a held pad, and by ear
+                were not clearly a chorus. Four is the full ensemble the effect
+                is there for, so there was nothing to gain. */
+
+            if (settings.contains ("eq_low_mode") && r.style != "Bass" && r.style != "Percussion")
+            {
+                const auto cut = pickFrom ("eq_low_mode", { { 0.0, 0.60f }, { 1.0, 0.40f } });
+                settings["eq_low_mode"] = cut;
+                if (cut >= 0.5)
+                {
+                    auto own = streamFor (seed, "eq_low_cutoff", 0xEF0Du);
+                    settings["eq_low_cutoff"] = 31.0 + 13.0 * uniform (own);   // about 50 to 110 Hz
+                }
+            }
+        }
+
+        if (r.locks.count (schema::Section::filter) == 0 && r.style != "Percussion")
+            for (const auto* f : { "filter_1", "filter_2" })
+            {
+                const auto model = settings.value (std::string (f) + "_model", 0.0);
+                // The two slopes exist on the classic models. The formant,
+                // comb and phaser models read the style as something else.
+                if (model < 4.5 && settings.contains (std::string (f) + "_style"))
+                    settings[std::string (f) + "_style"] = pickFrom (std::string (f) + "_style",
+                                                                     { { 0.0, 0.60f }, { 1.0, 0.40f } });
+            }
+    }
+
+    void Generator::keepMotionAndEchoesInHand (const Request& r, nlohmann::json& settings)
+    {
+        /*  Two rules from listening, for the styles meant to be played.
+
+            A tone should not leap. Several LFOs and random sources could land
+            on one filter cutoff at once, and on the leads a listener found
+            harsh, a sudden loud high-pitched change, they added up to 0.9 to
+            1.2 of the cutoff's range, 120 to 150 semitones of swing, where the
+            patches heard as musical had 0.21 to 0.26. Measured, those leads
+            rose 9 to 11 dB above 3 kHz within 150 ms while held, and the good
+            ones 2 to 4. So what the cyclic sources do to each tone control is
+            capped as a sum: a quarter and a bit of the cutoff's range, about
+            38 semitones, a fifth of a filter's resonance, whose swept peak
+            made the worst jumps of all, and 0.6 of a morph or a wave frame, which leaves the
+            morph on the key patch that was liked most untouched. Every
+            routing on an over-full destination shrinks by the same factor, so
+            the shape of the motion survives. An envelope is left alone, since
+            a sweep that happens once is a pluck, and so are macros.
+
+            And a note that is struck should not echo on long after. A delay
+            that dropped only 3.3 dB an echo, at a feedback of 0.68, lingered
+            for twelve echoes and five seconds, where one dropping 8 dB an echo
+            was heard as fading fast enough. So feedback stops at 0.45, at
+            least 7 dB an echo, and lower still on a long delay time, so the
+            echoes are 40 dB down within about three and a half seconds.
+
+            SFX and Experiment are left as they are, since unplaceable is their
+            job and the wild ones were liked. Drums are left out of the first
+            rule, since it is about a held note and a hit is not held.
+
+            The caps follow MOVE, as they are at its middle and up to 40% wider
+            or narrower at its ends. Fixed, they took MOVE from 77% agreement
+            back to 73%, since its two ends were held to the same reach. Anyone
+            turning MOVE up is asking for more motion, and the patches that
+            jumped were at its middle.
+        */
+        if (r.style == "SFX" || r.style == "Experiment")
+            return;
+
+        const auto move = r.sliders.count ("move") > 0 ? r.sliders.at ("move") : 0.5f;
+        const auto reach = (double) juce::jmap (move, 0.0f, 1.0f, 0.6f, 1.4f);
+
+        if (r.locks.count (schema::Section::mod) == 0 && settings.contains ("modulations")
+            && r.style != "Percussion")
+        {
+            const auto cyclic = [] (const std::string& s)
+            { return s.rfind ("lfo_", 0) == 0 || s.rfind ("random_", 0) == 0; };
+            const auto capFor = [] (const std::string& d) -> double
+            {
+                if (d.size() > 7 && d.compare (d.size() - 7, 7, "_cutoff") == 0 && d.rfind ("filter_", 0) == 0)
+                    return 0.30;
+                // A resonance swept by an LFO is a peak that suddenly screams.
+                // The worst jumps found, 20 to 26 dB above 3 kHz within 150
+                // ms, had 0.4 to 1.6 of cyclic modulation on it.
+                if (d.rfind ("filter_", 0) == 0 && d.find ("_resonance") != std::string::npos)
+                    return 0.20;
+                if (d.find ("_spectral_morph_amount") != std::string::npos || d.find ("_wave_frame") != std::string::npos)
+                    return 0.60;
+                if (d.rfind ("osc_", 0) == 0 && d.find ("_distortion_amount") != std::string::npos)
+                    return 0.40;
+                return -1.0;
+            };
+
+            auto& mods = settings["modulations"];
+            std::map<std::string, double> total;
+            for (size_t i = 0; i < mods.size(); ++i)
+                if (cyclic (modSource (mods[i])) && capFor (modDest (mods[i])) > 0.0)
+                    total[modDest (mods[i])] += std::abs (settings.value ("modulation_" + std::to_string (i + 1) + "_amount", 0.0));
+            for (size_t i = 0; i < mods.size(); ++i)
+            {
+                const auto dest = modDest (mods[i]);
+                const auto cap = capFor (dest);
+                if (! cyclic (modSource (mods[i])) || cap <= 0.0 || total[dest] <= cap * reach)
+                    continue;
+                const auto key = "modulation_" + std::to_string (i + 1) + "_amount";
+                settings[key] = settings.value (key, 0.0) * cap * reach / total[dest];
+            }
+        }
+
+        if (r.locks.count (schema::Section::fx) == 0 && settings.contains ("delay_feedback"))
+        {
+            // One echo's spacing at 120 BPM. A synced time lasts two to the
+            // power of seven minus the tempo in seconds, dotted half as long
+            // again, a triplet two thirds, as the LFOs measured.
+            const auto sync = (int) std::lround (settings.value ("delay_sync", 1.0));
+            auto spacing = 0.25;
+            if (sync >= 1)
+            {
+                spacing = std::pow (2.0, 7.0 - settings.value ("delay_tempo", 9.0));
+                if (sync == 2) spacing *= 1.5;
+                if (sync == 3) spacing *= 2.0 / 3.0;
+            }
+            const auto ceiling = juce::jmin (0.45, std::pow (10.0, -2.0 * spacing / 3.5));
+            settings["delay_feedback"] = juce::jmin (settings.value ("delay_feedback", 0.0), ceiling);
         }
     }
 
@@ -1745,8 +2043,15 @@ namespace gen
             if (used >= (int) a.routings.size() + extra)
                 break;
 
-            setModSlot (settings, sources[pickSource (rng)], destinations[pickDest (rng)],
-                        0.15f + uniform (rng) * 0.5f, uniform (rng) < 0.3f);
+            const auto* source = sources[pickSource (rng)];
+            const auto* dest = destinations[pickDest (rng)];
+            const auto amount = 0.15f + uniform (rng) * 0.5f;
+            const auto bipolar = uniform (rng) < 0.3f;
+            // An LFO on a knob that does nothing is a routing slot spent on
+            // silence, and the loop has tries to spare for another.
+            if (! destinationIsLive (dest, settings))
+                continue;
+            setModSlot (settings, source, dest, amount, bipolar);
         }
     }
 
@@ -2544,11 +2849,14 @@ namespace gen
         applyAxes (r, settings, prng);
         switchDistortion (r, settings);
         chooseWarp (r, settings, seed);
+        chooseMorph (r, settings, seed);
+        chooseEffectModes (r, settings, seed);
         if (r.base == nullptr)
             wireRouting (*style, r, settings, srng);
         wireMacros (r, result.preset, settings, result);
         scaleModulationDepth (r, settings);
         varyMotion (r, settings, seed);
+        keepMotionAndEchoesInHand (r, settings);
         keepStruckNotesStruck (r, settings);
         shapeDistortion (r, settings, seed);
         applyNoteShape (r, settings, prng);
