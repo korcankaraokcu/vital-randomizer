@@ -1,5 +1,7 @@
 # Vital Randomizer
 
+![](https://github.com/user-attachments/assets/4b92ab5f-16b8-45bc-b71e-431ba153d5e7)
+
 A VST3 instrument that hosts Vital and generates new presets into it while you
 play. Your MIDI passes straight through, so the keyboard plays the hosted synth
 exactly as it would if Vital were on the track directly, and a new patch arrives
