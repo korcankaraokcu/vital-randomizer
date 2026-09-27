@@ -80,6 +80,38 @@ Then rescan plugins in your DAW.
 
 Everything saves with the DAW project, including the patch that was playing.
 
+## vrgen, on the command line
+
+`vrgen.exe` rolls presets in batches, through the same generator and the same
+screen as the plugin, so every preset it writes has been rendered through
+Vital, checked for its style and levelled to -16 LUFS. It needs Vital
+installed, as the plugin does.
+
+```
+vrgen roll                                    6 of every style
+vrgen roll --styles=Lead,Keys --count=20      20 leads and 20 keys
+vrgen roll --styles=Percussion --drums=Kick,Snare --count=12
+vrgen roll --styles=Sequence --scales=hijaz,dorian
+vrgen roll --bright=0.8 --dirt=0.2-0.6        one slider held, one drawn per preset
+vrgen roll --complexity=ramp                  low to high across each style's presets
+vrgen roll --seed=1234                        the same batch again
+vrgen roll --into-vital                       straight into Vital's preset browser
+vrgen vary MyLead.vital --count=8 --depth=0.3 neighbours of a preset
+vrgen measure "C:\Presets\Mine"              the loudness of any folder of presets
+vrgen --list                                  styles, drum kinds and scales
+vrgen --help                                  everything else
+```
+
+A slider takes a value, a range drawn per preset, or `ramp`, and each style's
+own setting when left out. Files go to `vrgen presets` in the current folder
+unless `--out=<folder>` or `--into-vital` says otherwise, named by
+`--name="{style}_{n}"` with `{kind}`, `{scale}` and `{seed}` also available.
+
+Every preset stores the seed it was rolled from and can be rebuilt from it
+exactly. The same `--seed` gives the same batch nearly always: the screen
+renders each candidate, Vital's renders vary very slightly, and a candidate on
+the edge of a rule can pass on one run and be rolled again on another.
+
 ## Building
 
 Needs CMake 3.22 or newer and a C++17 compiler.
@@ -92,6 +124,7 @@ curl -L --create-dirs -o deps/nlohmann/json.hpp \
 cmake -S . -B build -A x64
 cmake --build build --config Release --target VitalRandomizer_VST3
 cmake --build build --config Release --target install_user_vst3
+cmake --build build --config Release --target vrgen
 ```
 
 `vrtest` generates a batch and scores it by rendering through real Vital,

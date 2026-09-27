@@ -35,6 +35,7 @@ target_sources(VitalRandomizer PRIVATE
     src/Drums.cpp
     src/Generator.cpp
     src/Loudness.cpp
+    src/Screen.cpp
     src/CandidateStore.cpp)
 
 target_compile_definitions(VitalRandomizer PUBLIC
@@ -120,6 +121,47 @@ target_link_libraries(vrtest PRIVATE
 
 if (MSVC)
     target_compile_options(vrtest PRIVATE /bigobj /Zc:__cplusplus)
+endif()
+
+# vrgen: the generator on the command line, for batches and variations. It
+# rolls through the same generator and the same screen as the plugin, so a
+# preset from here has been through exactly what one rolled in the plugin has.
+juce_add_console_app(vrgen PRODUCT_NAME "vrgen")
+
+target_sources(vrgen PRIVATE
+    cli/vrgen.cpp
+    src/VitalHost.cpp
+    src/VitalState.cpp
+    src/Audition.cpp
+    src/WavetableFactory.cpp
+    src/SampleFactory.cpp
+    src/Schema.cpp
+    src/Axes.cpp
+    src/Archetypes.cpp
+    src/Drums.cpp
+    src/Generator.cpp
+    src/Loudness.cpp
+    src/Screen.cpp)
+
+target_compile_definitions(vrgen PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_VST=0
+    JUCE_PLUGINHOST_AU=0
+    JUCE_STANDALONE_APPLICATION=1)
+
+target_include_directories(vrgen PRIVATE deps)
+
+target_link_libraries(vrgen PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_dsp
+    PUBLIC
+    juce::juce_recommended_config_flags)
+
+if (MSVC)
+    target_compile_options(vrgen PRIVATE /bigobj /Zc:__cplusplus)
 endif()
 
 # Loads a VST3 the way a DAW does, so the plugin can be checked against a real

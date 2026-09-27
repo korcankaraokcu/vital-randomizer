@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "Screen.h"
 
 #include "PluginEditor.h"
 #include "Axes.h"
@@ -415,113 +416,19 @@ void VitalRandomizerProcessor::dropPrefetch()
 
 bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measurement& measured)
 {
-    measured = {};
-
-    if (! preview.isLoaded() || ! result.preset.contains ("settings"))
-        return true;    // nothing to screen with, so take what we were given
-
+    // The screen itself lives in Screen.cpp, shared with vrgen, so a preset
+    // made on the command line has been through exactly what this one has.
     const auto sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
-
-    /*  Correct, then re-measure, then correct again if needed.
-
-        One pass is not enough. The volume calibration was swept on a clean
-        patch, and a patch with heavy distortion or compression in its chain
-        does not respond to master volume the same way, so the first correction
-        can land several dB off. Measuring what actually came out and going
-        again is the only way to be sure the patch a user hears is the level it
-        was supposed to be.
-    */
-    float totalDb = 0.0f;
-    for (int pass = 0; pass < 3; ++pass)
+    const auto verdict = screen::judge (preview, sr, 512, result, currentStyle.toStdString(),
+                                        slider ("complexity"), measured);
+    if (verdict.passed && preview.isLoaded())
     {
-        // The first load is verified. If Vital rejected the patch there is
-        // nothing to measure and rolling again is the right answer.
-        const auto loaded = pass == 0 ? preview.applyPresetVerified (result.preset)
-                                      : preview.applyPreset (result.preset);
-        if (! loaded)
-            return false;
-
-        // Vital's first render after taking a new state is not the settled
-        // patch, so a short one is played and discarded before measuring.
-        audition::settle (*preview.processor(), sr, 512);
-
-        measured = audition::auditionAveraged (*preview.processor(), sr, 512, 3, 48,
-                                               audition::judgedAsHit (currentStyle.toStdString()));
-        if (! measured.usable())
-            return false;
-
-        // A patch can be perfectly healthy and still be the wrong instrument.
-        // Judged as the kind of drum it was built as, where it is one.
-        const auto styleName = drums::profile (currentStyle.toStdString(), result.drumKind);
-        /*  Balance before brightness. A patch is allowed high frequency detail
-            as long as it stays quiet: what makes a bass a bass is how much of it
-            is down low, not where its mean lands.
-        */
-        const auto balance = audition::balanceFor (styleName);
-        if (measured.lowRatio > 0.0f && measured.lowRatio < balance.minLowRatio)
-            return false;
-        if (measured.highSpike > balance.maxHighSpike)
-            return false;
-
-        const auto bounds = audition::brightnessFor (styleName, slider ("complexity"));
-        if (measured.centroidHz > 0.0f
-            && (measured.centroidHz < bounds.low || measured.centroidHz > bounds.high))
-            return false;
-        if (measured.heldRatio > audition::maxHeldRatioFor (styleName))
-            return false;
-
-        // Give back the note that was pressed, or roll again.
-        /*  A stepping patch is read a step at a time. Measured whole, a clean
-            sequence looks like noise, because the window spans several notes.
-        */
-        const auto pitch = audition::pitchRuleFor (styleName);
-        const auto stepped = audition::isSteppedStyle (styleName) && measured.steps > 0;
-        const auto salience = stepped ? measured.stepSalience : measured.pitchSalience;
-        const auto pitchError = stepped ? measured.stepOffQuarterSemitones
-                              : pitch.octavesOnly ? measured.pitchErrorSemitones
-                                                  : measured.pitchOffGridSemitones;
-        if (pitch.required
-            && (salience < pitch.minSalience
-                || pitchError > pitch.maxErrorSemitones))
-            return false;
-
-        // And two octaves up, once: a level correction moves both notes alike.
-        if (pass == 0 && audition::failsUpTheKeyboard (*preview.processor(), sr, 512, styleName, measured) != nullptr)
-            return false;
-
-        auto wanted = loudness::correctionDb (measured.loudness, measured.peak);
-
-        /*  Nothing left to confirm.
-
-            The reading is already three renders averaged, taken before the
-            correction was worked out rather than after it looked right. This
-            used to measure once, correct by what that one render said and
-            measure once more, which is how a patch could bounce either side of
-            the target until the passes ran out and be thrown away for never
-            settling. It was the commonest rejection there was.
-        */
-        if (wanted == 0.0f)
-        {
-            auditionSummary = juce::String (measured.loudness, 3) + " level";
-            if (std::abs (totalDb) >= 1.0f)
-                auditionSummary << ", " << (totalDb > 0 ? "+" : "")
-                                << juce::String (juce::roundToInt (totalDb)) << " dB";
-            return true;
-        }
-
-        // Match the level by moving the patch's own master volume rather than
-        // trimming our output, so the level travels with the preset when it is
-        // exported.
-        const auto applied = loudness::normalisePreset (result.preset,
-                                                  measured.loudness, measured.peak);
-
-        // Running out of volume range means the patch is quiet at the source,
-        // not quiet at the output, and turning it up will not fix that.
-        if (std::abs (wanted - applied) > 6.0f)
-            return false;
-        totalDb += applied;
+        auditionSummary = juce::String (measured.loudness, 3) + " level";
+        if (std::abs (verdict.movedDb) >= 1.0f)
+            auditionSummary << ", " << (verdict.movedDb > 0 ? "+" : "")
+                            << juce::String (juce::roundToInt (verdict.movedDb)) << " dB";
     }
-    return false;
+    return verdict.passed;
 }
 
 void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHistory, bool varied)

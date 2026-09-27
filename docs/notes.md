@@ -183,8 +183,16 @@ Targets:
 |---|---|
 | `VitalRandomizer_VST3` | the plugin |
 | `VitalRandomizer_Standalone` | the same thing as an app, useful for testing |
+| `vrgen` | the generator on the command line, for users: batches, variations, loudness |
 | `vrtest` | rolls patches, renders them through real Vital, scores them |
 | `vrscan` | loads a VST3 the way a DAW does and plays a note through it |
+
+`vrgen` is what ships. It screens through `src/Screen.cpp`, which the plugin
+calls as well, so a preset from the command line has been through exactly what
+one rolled in the plugin has, and it keeps to what makes presets: `roll`,
+`vary` and `measure`. `vrtest` keeps its own copy of the screen, so its
+numbers stay comparable with everything measured before, and everything that
+checks the generator rather than uses it.
 
 `vrtest` also takes `--save=<dir>` to write a batch out for listening,
 `--complexity=<0..1>` to hold every roll at one setting or `--complexity=ramp`
