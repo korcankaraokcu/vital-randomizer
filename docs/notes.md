@@ -183,7 +183,7 @@ Targets:
 |---|---|
 | `VitalRandomizer_VST3` | the plugin |
 | `VitalRandomizer_Standalone` | the same thing as an app, useful for testing |
-| `vrgen` | the generator on the command line, for users: batches, variations, loudness |
+| `vrgen` | the CLI: batches, variations and loudness checks |
 | `vrtest` | rolls patches, renders them through real Vital, scores them |
 | `vrscan` | loads a VST3 the way a DAW does and plays a note through it |
 
@@ -276,7 +276,7 @@ produce, because nothing is being asked of it.
 **Axes**, tested by building the same patch from one seed twice, once with the
 slider low and once high, each scored on the number that axis is meant to move.
 BRIGHT 99%, SPACE 94%, MOVE 73%, DIRT 81%, over about 315 pairs each;
-see "What a slider is worth".
+see "Testing the sliders".
 
 **Timing**, on a real instance:
 
@@ -611,7 +611,7 @@ for months. Seven bass rolls in ten were being rejected, and the batch never
 showed it because it simply rolled again, up to eight times a slot, and reported
 96% usable.
 
-## A note that is slow is not a note that is long
+## Slow attacks and long notes
 
 Those basses were rejected for `note keeps going`, and none of them kept going.
 Played and held, every one of them stopped. What they had in common was the
@@ -638,7 +638,7 @@ left for it to catch is the real case, a note genuinely louder late than early.
 None of it came from the numbers. The numbers said the notes would not stop, and
 they were wrong. It came from playing them.
 
-## What a slider is worth
+## Testing the sliders
 
 `vrtest --axis=<key> --trials=N` builds the same patch twice from one seed, once
 with the slider low and once high, and asks whether the sound moved the way the
@@ -1291,7 +1291,7 @@ It is drawn back in where BRIGHT asks now, and drums agree 90% of the time with 
 median move of 139 Hz. The rest of the gap is the kinds that are mostly sample
 now, the cymbals, timpani and cowbell, where the filter has less to shape.
 
-## Level, read the way it is heard
+## Loudness (LUFS)
 
 Every patch was levelled to the same RMS, the median of the hand-made library.
 Measured in LUFS, the broadcast loudness standard, the batch as a whole sat
@@ -1323,7 +1323,7 @@ at -23 to -27: a meter averages over 400 ms, so a click of 50 ms would need abou
 10 dB more to read -16 and its peak would clip, which the peak ceiling prevents.
 Every style screens 100%.
 
-## Up the keyboard
+## Checking higher notes
 
 Every check was made on one note, C3, so a patch that fell apart higher up
 passed. One lead, heard as inaudible above the middle of the keyboard, read as
@@ -1350,7 +1350,7 @@ render a candidate and turns down about one roll in a hundred. Played through a
 separate Vital at C3, C5 and C6, 35 of 36 leads, keys and pads held their level
 and note, the last a pad at C6 just under the pitch bar.
 
-## Three renders, and why it is not two
+## Why three renders
 
 Every check now runs on three renders averaged rather than one, because Vital
 randomises unison phase at every note on and one render of one patch reads a

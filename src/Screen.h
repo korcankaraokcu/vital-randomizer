@@ -9,7 +9,7 @@
 /*
     The screen a generated patch has to pass, in one place.
 
-    The plugin and vrgen both call this, so a preset made on the command line
+    The plugin and vrgen both call this, so a preset made with the CLI
     has been through exactly what one rolled in the plugin has. It renders the
     candidate through a hosted Vital, turns it down if it is unusable or the
     wrong instrument for its style, and levels it into its own master volume.

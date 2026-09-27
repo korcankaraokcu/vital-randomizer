@@ -1,5 +1,5 @@
 /*
-    vrgen, Vital Randomizer on the command line.
+    vrgen, the Vital Randomizer CLI.
 
     Rolls batches of presets, or variations of one you already have, through
     the same generator and the same screen as the plugin, so every preset it
@@ -42,7 +42,7 @@ namespace
     // can afford to look harder.
     constexpr int kAttempts = 16;
 
-    const char* kHelp = R"(vrgen, Vital Randomizer on the command line
+    const char* kHelp = R"(vrgen, the Vital Randomizer CLI
 
 Every preset is rolled by the same generator as the plugin and passes the same
 screen: rendered through Vital, checked against its style, levelled to -16 LUFS.
@@ -80,12 +80,11 @@ Vital has to be installed.
 
   vrgen --list                 styles, drum kinds and scales
 
-About seeds. Every preset stores the seed it was rolled from, and the generator
-rebuilds a preset from its seed exactly. A batch seed picks those seeds, so the
-same command writes the same batch. The screen judges each candidate by
-rendering it, though, and Vital's renders vary very slightly, so a candidate on
-the edge of a rule can pass on one run and be rolled again on another. Nearly
-every batch repeats exactly, and every preset in it can always be rebuilt.
+About seeds. Every batch prints its seed when it starts. Run the same command
+with --seed=<that number> to get the same batch again. This works nearly always,
+but not guaranteed: every candidate is rendered to be checked, Vital's renders
+vary very slightly, and one right on the edge of a rule can pass on one run and
+be rolled again on the next.
 )";
 
     struct Options

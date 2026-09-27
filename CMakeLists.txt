@@ -123,7 +123,7 @@ if (MSVC)
     target_compile_options(vrtest PRIVATE /bigobj /Zc:__cplusplus)
 endif()
 
-# vrgen: the generator on the command line, for batches and variations. It
+# vrgen, the CLI, for batches and variations. It
 # rolls through the same generator and the same screen as the plugin, so a
 # preset from here has been through exactly what one rolled in the plugin has.
 juce_add_console_app(vrgen PRODUCT_NAME "vrgen")

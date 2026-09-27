@@ -36,56 +36,28 @@ Then rescan plugins in your DAW.
 
 ## Using it
 
-- **ROLL** makes a fresh patch from the style and the sliders.
-- **BRIGHT / MOVE / DIRT / SPACE** set the character. DIRT at zero switches the
-  distortion off and leaves the filters clean. Further up it drives both harder
-  and lets in harsher circuits: the soft and hard clippers from the start, the
-  folders from 0.4, and the bit crusher and sample rate reducer from 0.7.
-  **COMPLEX** sets how much of the synth a patch is allowed to use, from one
-  oscillator through one filter to three oscillators, both filters and a wall of
-  modulation, and how likely its oscillators are to be warped. Each style starts
-  where that style usually sits and individual rolls vary around it, so a batch
-  holds both sparse patches and busy ones.
-- **VARY** moves the current patch instead of replacing it. It keeps the
-  oscillators, the LFO shapes and what they are wired to, the macros and a
-  sequence's riff, and nudges the filters, the envelopes, how fast the LFOs run
-  and how far the modulation reaches. The bar beside it sets how far, and the
-  button shows that depth in its name.
-- **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
-- **&lt; &gt;** walk the candidate history and **KEEP** stars one. Starred
-  patches sit in the KEPT row: click one to load it, right click to remove it.
-  A star holds the patch as it stands, so anything you changed by hand in
-  Vital's own GUI is kept too.
-- **SCALES** appears on the Sequence style and says which scales a riff may be
-  built on. It starts on **Random scale**, which is the whole table of them.
-  **+** adds another dropdown and **-** takes the last one away, so picking,
-  say, blues and dorian means every sequence walks one or the other and nothing
-  else. Two entries in the list are not scales. **random steps** draws every step on
-  its own and snaps it to the nearest semitone, which leaps about the way a
-  machine does rather than the way a player would, and **random quarter tones**
-  does the same on the grid halfway between the semitones, so about half the
-  steps land on pitches the keyboard has no key for.
-- **DRUMS** appears on the Percussion style and says which kinds of drum a roll
-  may build: kick, snare, clap, closed hat, open hat, crash, ride, tom, timpani,
-  cowbell, rim and shaker. It starts on **Random drum**, which is any of them,
-  and **+** and **-** work as they do for scales. The tuned ones, the kick, the
-  toms, the timpani and the cowbell, follow the keyboard, so playing a
-  different note tunes the drum. Hats are built on an 808 style metal
-  sample and crashes and rides on a resonant plate sample that darkens as
-  it rings, all with the oscillators off. The shaker keeps shaking in time
-  with the song for as long as the key is held. A drum's name says which kind it is,
-  and its LFOs are named for what they move.
-- **EXPORT** writes the current patch to a `.vital` file.
+- **ROLL** makes a new patch from the style and the sliders.
+- **BRIGHT / MOVE / DIRT / SPACE** set the character, and **COMPLEX** sets how
+  much of the synth a patch uses.
+- **VARY** nudges the current patch instead of replacing it. The bar next to it
+  sets how far.
+- **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it
+  alone.
+- **&lt; &gt;** walk the history and **KEEP** stars a patch for the KEPT row.
+- **SCALES** (Sequence) picks which scales a riff can use.
+- **DRUMS** (Percussion) picks which drums a roll can build: kick, snare, clap,
+  hats, crash, ride, tom, timpani, cowbell, rim and shaker. Tuned drums follow
+  the keyboard.
+- **EXPORT** saves the current patch as a `.vital` file.
 - **...** locates Vital if it moved.
 
-Everything saves with the DAW project, including the patch that was playing.
+Everything saves with the DAW project.
 
-## vrgen, on the command line
+## CLI (vrgen)
 
-`vrgen.exe` rolls presets in batches, through the same generator and the same
-screen as the plugin, so every preset it writes has been rendered through
-Vital, checked for its style and levelled to -16 LUFS. It needs Vital
-installed, as the plugin does.
+`vrgen.exe` makes presets in batches. It uses the same generator and checks as
+the plugin, so every preset is rendered through Vital and levelled to -16 LUFS.
+Vital needs to be installed.
 
 ```
 vrgen roll                                    6 of every style
@@ -107,10 +79,11 @@ own setting when left out. Files go to `vrgen presets` in the current folder
 unless `--out=<folder>` or `--into-vital` says otherwise, named by
 `--name="{style}_{n}"` with `{kind}`, `{scale}` and `{seed}` also available.
 
-Every preset stores the seed it was rolled from and can be rebuilt from it
-exactly. The same `--seed` gives the same batch nearly always: the screen
-renders each candidate, Vital's renders vary very slightly, and a candidate on
-the edge of a rule can pass on one run and be rolled again on another.
+Every batch prints its seed when it starts. Run the same command with
+`--seed=<that number>` to get the same batch again. This works nearly always,
+but not guaranteed: every candidate is rendered to be checked, Vital's renders
+vary very slightly, and one right on the edge of a rule can pass on one run and
+be rolled again on the next.
 
 ## Building
 
