@@ -904,4 +904,29 @@ namespace audition
 
         return m;
     }
+
+    const char* failsUpTheKeyboard (juce::AudioProcessor& synth, double sampleRate, int blockSize,
+                                    const std::string& profile, const Measurement& atC3)
+    {
+        const auto style = drums::styleOf (profile);
+        if (style != "Bass" && style != "Keys" && style != "Lead" && style != "Pad"
+            && style != "Sequence")
+            return nullptr;
+
+        // A bass an octave up, since nobody plays one at C5: its filter sits
+        // low enough that two octaves up took the fundamental away.
+        const auto high = auditionAveraged (synth, sampleRate, blockSize, 1, style == "Bass" ? 60 : 72, false);
+        if (atC3.loudness > 1.0e-6f
+            && 20.0f * std::log10 (juce::jmax (1.0e-9f, high.loudness) / atC3.loudness) < -10.0f)
+            return "quiet up the keyboard";
+
+        const auto pitch = pitchRuleFor (profile);
+        if (pitch.required && ! isSteppedStyle (profile))
+        {
+            const auto error = pitch.octavesOnly ? high.pitchErrorSemitones : high.pitchOffGridSemitones;
+            if (high.pitchSalience < pitch.minSalience || error > pitch.maxErrorSemitones)
+                return "loses its note up the keyboard";
+        }
+        return nullptr;
+    }
 }

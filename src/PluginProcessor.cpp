@@ -485,6 +485,10 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
                 || pitchError > pitch.maxErrorSemitones))
             return false;
 
+        // And two octaves up, once: a level correction moves both notes alike.
+        if (pass == 0 && audition::failsUpTheKeyboard (*preview.processor(), sr, 512, styleName, measured) != nullptr)
+            return false;
+
         auto wanted = loudness::correctionDb (measured.loudness, measured.peak);
 
         /*  Nothing left to confirm.

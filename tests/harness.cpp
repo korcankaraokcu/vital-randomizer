@@ -1770,6 +1770,17 @@ int main (int argc, char** argv)
                         break;
                     }
 
+                    // And two octaves up, once: a level correction moves both
+                    // notes alike.
+                    if (pass == 0)
+                        if (const auto* why = audition::failsUpTheKeyboard (*host.processor(), kSampleRate,
+                                                                             kBlockSize, profile, m))
+                        {
+                            exhausted = false;
+                            rejects[style][why]++;
+                            break;
+                        }
+
                     auto wanted = loudness::correctionDb (m.loudness, m.peak);
                     asked.push_back (wanted);
 

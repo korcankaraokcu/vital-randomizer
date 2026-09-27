@@ -1315,6 +1315,33 @@ at -23 to -27: a meter averages over 400 ms, so a click of 50 ms would need abou
 10 dB more to read -16 and its peak would clip, which the peak ceiling prevents.
 Every style screens 100%.
 
+## Up the keyboard
+
+Every check was made on one note, C3, so a patch that fell apart higher up
+passed. One lead, heard as inaudible above the middle of the keyboard, read as
+a clean note at C3 and at C5 had lost 11 to 17 dB, its pitch stuck on one
+frequency whatever key was pressed. Its wavetable held nothing below its eighth
+harmonic, its energy centred on the sixteenth. Each octave up doubles every
+harmonic, and past the top of what Vital plays they are dropped, so by C5 most
+of the sound had gone. A formant scale morph above half its range lifted the
+energy further and made it worse, though on its own each morph type holds its
+level within 2 dB from C3 to C7.
+
+The formant and vocal wavetable characters draw three formants anywhere up to
+the 22nd harmonic, and where all three landed high the table had no body. On
+the played styles, Bass, Keys, Lead, Pad and Sequence, the lowest formant now
+stays between the second and fourth harmonic. Tables with under a tenth of
+their energy in their first eight harmonics went from appearing in Keys, Pads
+and Sequences to none. SFX and Experiment keep the whole range.
+
+And the screen plays those styles once more, at C5, a bass at C4, since nobody
+plays a bass two octaves up and its filter sits low enough to take the
+fundamental away there. A patch more than 10 dB quieter than at C3, or that no
+longer sounds the note where its style must, is turned down. It costs one more
+render a candidate and turns down about one roll in a hundred. Played through a
+separate Vital at C3, C5 and C6, 35 of 36 leads, keys and pads held their level
+and note, the last a pad at C6 just under the pitch bar.
+
 ## Three renders, and why it is not two
 
 Every check now runs on three renders averaged rather than one, because Vital

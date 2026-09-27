@@ -228,6 +228,19 @@ namespace wavetable
             for (auto& f : s.formants)
                 f = uniform (rng, 1.5f, 22.0f);
             std::sort (s.formants.begin(), s.formants.end());
+            /*  A played style keeps a body under its formants. Three drawn
+                anywhere up to the 22nd harmonic could all land high, and one
+                lead's table held nothing at all in its first eight harmonics,
+                its energy centred on the sixteenth. That reads as a note at
+                C3, but each octave up doubles every harmonic, so by C5 most
+                of it was past what Vital can play: the lead fell 11 to 17 dB
+                quiet with its pitch stuck. The lowest formant stays between
+                the second and fourth harmonic. SFX and Experiment keep the
+                whole range. */
+            const auto played = r.style == "Bass" || r.style == "Keys" || r.style == "Lead"
+                                || r.style == "Pad" || r.style == "Sequence";
+            if (played && s.formants[0] > 4.0f)
+                s.formants[0] = 1.5f + (s.formants[0] - 1.5f) * (2.5f / 20.5f);
             return s;
         }
 

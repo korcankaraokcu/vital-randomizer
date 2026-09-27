@@ -264,4 +264,22 @@ namespace audition
 
     /** Whether a style is judged as a hit. */
     inline bool judgedAsHit (const std::string& style) { return style == "Percussion"; }
+
+    /*  Whether a played patch still works two octaves up.
+
+        Everything else is judged on one note, C3, so a patch that falls apart
+        higher up passed. One lead whose wavetable held no energy below its
+        eighth harmonic read as a clean note at C3 and at C5 had lost 11 to 17
+        dB and its pitch, since each octave doubles every harmonic and Vital
+        cannot play past the top of its range. The patch is played once more
+        at C5, a bass at C4, and turned down if it is more than 10 dB quieter
+        than at C3, or,
+        where its style has to sound the note, if it no longer does. Only for
+        the styles somebody plays up and down a keyboard; a sequence is judged
+        on its level alone, since its riff is read a step at a time.
+
+        Returns why it failed, or nullptr when it holds up.
+    */
+    const char* failsUpTheKeyboard (juce::AudioProcessor& synth, double sampleRate, int blockSize,
+                                    const std::string& profile, const Measurement& atC3);
 }
