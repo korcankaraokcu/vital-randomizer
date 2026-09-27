@@ -4,6 +4,11 @@ project(VitalRandomizer VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Build the C++ runtime into the binaries, so the plugin and vrgen work on a PC
+# that does not have the Visual C++ Redistributable installed. It adds about
+# half a megabyte to each.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 add_subdirectory(deps/JUCE)
 
 juce_add_plugin(VitalRandomizer

@@ -23,16 +23,19 @@ starting points, so what it makes is yours.
 
 ## Install
 
-Grab the latest build from the [releases page](../../releases) and put
-`Vital Randomizer.vst3` in your VST3 folder:
+Download the latest zip from the [releases page](../../releases) and extract
+it. Inside is a folder named `Vital Randomizer.vst3`. Move that whole folder,
+as it is, into your VST3 folder:
 
-| | |
-|---|---|
-| Windows | `%LOCALAPPDATA%\Programs\Common\VST3` |
-| macOS | `~/Library/Audio/Plug-Ins/VST3` |
-| Linux | `~/.vst3` |
+- `C:\Program Files\Common Files\VST3` is the standard location every DAW
+  scans. Windows asks for admin permission to copy there.
+- `%LOCALAPPDATA%\Programs\Common\VST3` needs no admin permission. If your DAW
+  does not find the plugin there, use the first location instead.
 
-Then rescan plugins in your DAW.
+Then rescan plugins in your DAW. Releases are for Windows.
+
+The CLI is a single file, `vrgen.exe`. Put it anywhere and run it from a
+terminal.
 
 ## Using it
 
