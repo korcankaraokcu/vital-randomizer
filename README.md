@@ -49,7 +49,9 @@ Then rescan plugins in your DAW.
   hats, crash, ride, tom, timpani, cowbell, rim and shaker. Tuned drums follow
   the keyboard.
 - **EXPORT** saves the current patch as a `.vital` file.
-- **...** locates Vital if it moved.
+- The options button at the top right (**...**) has a **Locate Vital.vst3**
+  action that can relocate Vital if it moved. It also shows which version
+  you're running.
 
 Everything saves with the DAW project.
 

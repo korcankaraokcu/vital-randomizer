@@ -632,6 +632,8 @@ void VitalRandomizerEditor::timerCallback()
 void VitalRandomizerEditor::showSettingsMenu()
 {
     juce::PopupMenu menu;
+    menu.addItem (4, "Vital Randomizer " + juce::String (JucePlugin_VersionString), false);
+    menu.addSeparator();
     menu.addItem (1, "Locate Vital.vst3");
     menu.addSeparator();
     menu.addItem (3, "Vital: " + (proc.status().vitalReady ? juce::String ("loaded")

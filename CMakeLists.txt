@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(VitalRandomizer VERSION 0.1.0 LANGUAGES CXX)
+project(VitalRandomizer VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(deps/JUCE)
 
 juce_add_plugin(VitalRandomizer
+    VERSION                 ${PROJECT_VERSION}
     COMPANY_NAME            "Korcan Karaokcu"
     PLUGIN_MANUFACTURER_CODE Kkao
     PLUGIN_CODE              Vrnd
@@ -126,7 +127,7 @@ endif()
 # vrgen, the CLI, for batches and variations. It
 # rolls through the same generator and the same screen as the plugin, so a
 # preset from here has been through exactly what one rolled in the plugin has.
-juce_add_console_app(vrgen PRODUCT_NAME "vrgen")
+juce_add_console_app(vrgen PRODUCT_NAME "vrgen" VERSION ${PROJECT_VERSION})
 
 target_sources(vrgen PRIVATE
     cli/vrgen.cpp
@@ -152,6 +153,7 @@ target_compile_definitions(vrgen PUBLIC
     JUCE_STANDALONE_APPLICATION=1)
 
 target_include_directories(vrgen PRIVATE deps)
+target_compile_definitions(vrgen PRIVATE VRGEN_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(vrgen PRIVATE
     juce::juce_audio_utils

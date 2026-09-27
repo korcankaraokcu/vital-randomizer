@@ -42,7 +42,7 @@ namespace
     // can afford to look harder.
     constexpr int kAttempts = 16;
 
-    const char* kHelp = R"(vrgen, the Vital Randomizer CLI
+    const char* kHelp = R"(vrgen )" VRGEN_VERSION R"(, the Vital Randomizer CLI
 
 Every preset is rolled by the same generator as the plugin and passes the same
 screen: rendered through Vital, checked against its style, levelled to -16 LUFS.
@@ -79,6 +79,7 @@ Vital has to be installed.
       the screen measures it.
 
   vrgen --list                 styles, drum kinds and scales
+  vrgen --version              the version
 
 About seeds. Every batch prints its seed when it starts. Run the same command
 with --seed=<that number> to get the same batch again. This works nearly always,
@@ -661,6 +662,11 @@ int main (int argc, char** argv)
     }
     if (command == "--list" || command == "list")
         return list();
+    if (command == "--version" || command == "-v" || command == "version")
+    {
+        std::cout << "vrgen " << VRGEN_VERSION << std::endl;
+        return 0;
+    }
 
     const auto options = parse (argc, argv, 2);
     if (options.has ("help"))
