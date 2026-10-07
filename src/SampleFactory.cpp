@@ -109,6 +109,26 @@ namespace sampler
                     x *= peak / loudest;
         }
 
+        /*  A one shot has to be silent by the time it runs out.
+
+            A string or a bell that is still ringing when the second is up stops
+            dead in the middle of a cycle, and a held note that reaches the end
+            hears that as a pop, like a cable going into an amp. Short notes
+            never get there, which is why it only shows on long ones. Pulling
+            the last stretch down on a cosine makes the end sound like the ring
+            dying a little early rather than being cut.
+        */
+        void decayToSilence (std::vector<float>& a, float seconds = 0.35f)
+        {
+            const auto length = std::min ((int) a.size(), (int) (seconds * kRate));
+            for (int i = 0; i < length; ++i)
+            {
+                const auto t = (float) i / (float) length;
+                const auto gain = 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (1.0f - t));
+                a[a.size() - 1 - (size_t) i] *= gain;
+            }
+        }
+
         /*  A bed has to join back onto itself.
 
             Vital loops the sample, and a loop whose end does not meet its start
@@ -278,6 +298,7 @@ namespace sampler
             }
 
             removeDcAndNormalise (a);
+            decayToSilence (a);
             return a;
         }
 
@@ -323,6 +344,7 @@ namespace sampler
             }
 
             removeDcAndNormalise (a);
+            decayToSilence (a);
             return a;
         }
 
@@ -1094,6 +1116,7 @@ namespace sampler
             }
 
             removeDcAndNormalise (a);
+            decayToSilence (a);
             return a;
         }
 
