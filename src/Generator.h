@@ -133,6 +133,10 @@ namespace gen
         /** Give oscillators a spectral morph type, so the morph amount does
             something, and keep the amount where that type is safe. */
         void chooseMorph (const Request& r, nlohmann::json& settings, unsigned int seed);
+        /** In keys and leads, keep layers an octave away from being louder
+            than the oscillator on the note, so they support it rather than
+            lead. */
+        void keepTheNoteInFront (const Request& r, nlohmann::json& settings);
         /** The effects' own modes, which nothing else draws: the delay's
             style and timing, the chorus's voices, the filters' slope and the
             EQ's low band. */

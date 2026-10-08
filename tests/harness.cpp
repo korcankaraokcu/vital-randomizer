@@ -463,6 +463,10 @@ int main (int argc, char** argv)
                 continue;
             byStyle[style].push_back ({ m.rms, m.loudness });
             every.push_back ({ m.rms, m.loudness });
+            // What the screen's held note check reads, so a threshold can be
+            // set against files that have been listened to.
+            std::cout << f.getFileName().paddedRight (' ', 32) << "presence "
+                      << juce::String (m.presenceDb, 1) << " dB" << std::endl;
         }
         const auto report = [] (const std::string& label, std::vector<std::pair<float, float>> v)
         {
@@ -1737,6 +1741,12 @@ int main (int argc, char** argv)
                                 + "_" + juce::String (result.seed) + ".vital")
                                      .replaceWithText (result.preset.dump (2));
                         }
+                        break;
+                    }
+                    if (m.presenceDb > audition::maxPresenceFor (profile))
+                    {
+                        exhausted = false;
+                        rejects[style]["whistles when held"]++;
                         break;
                     }
 

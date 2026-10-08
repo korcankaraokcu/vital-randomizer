@@ -63,14 +63,18 @@ namespace archetype
                     { "lfo_1", "osc_1_wave_frame", 0.25f, false },
                 } });
 
-            /*  Lead. The brightest style in the library by a wide margin, and
-                the one meant to carry a melody, so it holds the note, runs
-                unison for width and sits in reverb and delay.
+            /*  Lead. The one meant to carry a melody, so it holds the note,
+                runs unison for width and sits in reverb and delay.
+
+                It keeps the octave below as body, the same as keys. With
+                oscillator two at the note and nearly as loud as oscillator
+                one there was no weight under it, and a lead sounded an octave
+                higher than keys played on the same key.
             */
             list.push_back ({ "Lead",
                 with (common(), {
                     { "osc_1_unison_voices", 6.0 }, { "osc_1_unison_detune", 2.2 },
-                    { "osc_2_level", 0.48 }, { "osc_2_transpose", 0.0 },
+                    { "osc_2_level", 0.26 },
                     { "osc_2_unison_voices", 4.0 },
                     { "polyphony", 8.0 },
                     { "filter_1_cutoff", 86.0 }, { "filter_1_resonance", 0.08 },
@@ -471,7 +475,10 @@ namespace archetype
     {
         //                                         bright  move   dirt  space  cplx
         if (style == "Bass")       return Sliders { 0.26f, 0.55f, 0.62f, 0.20f, 0.45f };
-        if (style == "Lead")       return Sliders { 0.80f, 0.65f, 0.55f, 0.45f, 0.68f };
+        // Lead shares keys' brightness. At 0.80 a held lead was bright for
+        // as long as the key was down and tiring to listen to, where keys get
+        // the same top only on the strike.
+        if (style == "Lead")       return Sliders { 0.60f, 0.65f, 0.55f, 0.45f, 0.68f };
         if (style == "Keys")       return Sliders { 0.60f, 0.45f, 0.20f, 0.55f, 0.58f };
         if (style == "Pad")        return Sliders { 0.45f, 0.70f, 0.15f, 0.90f, 0.78f };
         if (style == "Sequence")   return Sliders { 0.65f, 0.85f, 0.45f, 0.40f, 0.72f };

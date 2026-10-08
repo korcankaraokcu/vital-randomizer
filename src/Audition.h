@@ -98,6 +98,19 @@ namespace audition
         */
         float heldRatio = 1.0f;
 
+        /*  How much of a held note sits where the ear is sharpest.
+
+            The share of the energy between 2 and 5 kHz, in dB, at the loud end
+            of the hold: the 90th percentile of 50 ms windows from 0.4 s on. A lead can play the right note and have an
+            ordinary centroid while one high harmonic, around the eleventh on
+            C4, stands as loud as the note itself. An LFO on the wavetable then
+            moves which harmonic that is, and it is heard as a second, higher
+            pitch wandering over the note. The pitch check cannot see it, since
+            a harmonic repeats with the note, and an average brightness hides
+            it among quieter bins.
+        */
+        float presenceDb = -100.0f;
+
         /*  What note the patch actually sounds, and how definite it is.
 
             Capping pitch modulation was not enough on its own. A patch can hold
@@ -187,6 +200,9 @@ namespace audition
 
     /** How much of a held note a style may still have late on. */
     float maxHeldRatioFor (const std::string& profile);
+
+    /** The most of a held note a style may put between 2 and 5 kHz, in dB. */
+    float maxPresenceFor (const std::string& profile);
 
     /*  Whether a style has to give back the note that was pressed.
 

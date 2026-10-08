@@ -74,6 +74,8 @@ namespace screen
                 return turnDown ("too bright");
             if (measured.heldRatio > audition::maxHeldRatioFor (styleName))
                 return turnDown ("note keeps going");
+            if (measured.presenceDb > audition::maxPresenceFor (styleName))
+                return turnDown ("whistles when held");
 
             // Give back the note that was pressed, or roll again.
             /*  A stepping patch is read a step at a time. Measured whole, a

@@ -126,6 +126,7 @@ namespace audition
                 sum.lowRatio += m.lowRatio; sum.highSpike += m.highSpike;
                 sum.spectralMotion += m.spectralMotion;
                 sum.heldRatio += m.heldRatio;
+                sum.presenceDb += m.presenceDb;
                 sum.pitchHz += m.pitchHz;   sum.pitchSalience += m.pitchSalience;
                 sum.pitchErrorSemitones += m.pitchErrorSemitones;
                 sum.pitchOffGridSemitones += m.pitchOffGridSemitones;
@@ -150,7 +151,7 @@ namespace audition
             for (auto* v : { &sum.rms, &sum.loudness, &sum.peak, &sum.sustainRms, &sum.tailRms,
                              &sum.motion, &sum.crestDb, &sum.balanceDb, &sum.centroidHz,
                              &sum.lowRatio, &sum.highSpike, &sum.spectralMotion,
-                             &sum.heldRatio, &sum.pitchHz, &sum.pitchSalience,
+                             &sum.heldRatio, &sum.presenceDb, &sum.pitchHz, &sum.pitchSalience,
                              &sum.pitchErrorSemitones, &sum.pitchOffGridSemitones,
                              &sum.stepSalience, &sum.stepErrorSemitones,
                              &sum.stepOffGridSemitones, &sum.stepOffQuarterSemitones })
@@ -243,6 +244,24 @@ namespace audition
         // than it was early on, and a limit of exactly one rejected pads for
         // doing the one thing a pad is for.
         return kNoHeldLimit;
+    }
+
+    float maxPresenceFor (const std::string& profile)
+    {
+        /*  Set by ear on a lead batch, measured here exactly as the screen
+            does. The three leads heard as having a whistle wandering over the
+            note read -3.1 to -4.0 dB, and the four heard as fine or acceptable
+            -5.2 and below, so the line sits in that gap. It is a narrow one
+            drawn from seven patches, and worth moving if more are listened to.
+
+            Only lead, for now. A keys patch heard as one of the best measured
+            close to the bad leads, most likely because a key fades where a
+            lead is held at full level, so the same top is heard for a moment
+            rather than for as long as the key is down.
+        */
+        if (drums::styleOf (profile) == "Lead")
+            return -4.6f;
+        return 100.0f;
     }
 
     BalanceRule balanceFor (const std::string& profile)
@@ -654,7 +673,9 @@ namespace audition
             juce::dsp::FFT fft (11);
             const auto n = (size_t) 1 << 11;
             double loudestTotal = 1.0e-12, loudestHigh = 0.0;
-            std::vector<double> centroids;
+            std::vector<double> centroids, presence;
+            // From 0.4 s, where the note is being held rather than struck.
+            const auto heldFrom = (size_t) ((0.40 - (hit ? 0.0 : 0.05)) * sampleRate);
 
             for (size_t at = 0; at + window < mono.size(); at += window / 2)
             {
@@ -667,7 +688,7 @@ namespace audition
                 }
                 fft.performFrequencyOnlyForwardTransform (data.data());
 
-                double sum = 0.0, high = 0.0, weighted = 0.0;
+                double sum = 0.0, high = 0.0, weighted = 0.0, sharp = 0.0;
                 for (size_t i = 1; i < n / 2; ++i)
                 {
                     const auto e = (double) data[i] * data[i];
@@ -676,7 +697,11 @@ namespace audition
                     weighted += e * hz;
                     if (hz > 2000.0)
                         high += e;
+                    if (hz > 2000.0 && hz < 5000.0)
+                        sharp += e;
                 }
+                if (at >= heldFrom && sum > 1.0e-9)
+                    presence.push_back (10.0 * std::log10 (juce::jmax (1.0e-12, sharp / sum)));
                 loudestTotal = juce::jmax (loudestTotal, sum);
                 if (at >= skip)
                     loudestHigh = juce::jmax (loudestHigh, high);
@@ -687,6 +712,14 @@ namespace audition
                     centroids.push_back (weighted / sum);
             }
             m.highSpike = (float) (loudestHigh / loudestTotal);
+
+            if (! presence.empty())
+            {
+                // The loud end of the hold, since the whistle is heard when an
+                // LFO swings it up, not on average.
+                std::sort (presence.begin(), presence.end());
+                m.presenceDb = (float) presence[(presence.size() - 1) * 9 / 10];
+            }
 
             if (centroids.size() > 2)
             {

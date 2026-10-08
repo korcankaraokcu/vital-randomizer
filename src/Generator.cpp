@@ -268,7 +268,10 @@ namespace gen
             if (style == "Bass")       return { -0.5f, +0.3f, -1.0f, -0.4f, 0.0f,  0.15f, 0.45f, 1.08f, 1.20f, 0.16f };
             if (style == "Percussion") return { -0.8f, -0.2f, -1.0f, -0.5f, 0.0f,  0.10f, 0.35f, 0.88f, 1.12f, 0.10f };
             if (style == "Keys")       return { -0.4f, +0.1f, -0.6f, -0.2f, 0.55f, 0.20f, 0.0f,  1.00f, 1.28f, 0.35f };
-            if (style == "Lead")       return { -0.1f, +0.2f, +0.4f, +0.3f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f };
+            // Lead starts like keys. Leaning only slightly short with no cap
+            // left a third of leads taking most of a second to arrive, which
+            // is a swell rather than a played line.
+            if (style == "Lead")       return { -0.4f, +0.2f, +0.4f, +0.3f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.35f };
             if (style == "Pad")        return { +0.7f, +0.5f, +0.7f, +0.6f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f };
             if (style == "Sequence")   return { -0.3f, +0.1f, +0.5f, -0.2f, 1.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.25f, 0.70f };
             return { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
@@ -810,8 +813,11 @@ namespace gen
             && r.locks.count (schema::Section::osc) == 0)
         {
             const auto lowRegister = r.style == "Bass" || r.style == "Percussion";
+            // Keys and leads are played a note at a time on the octave the
+            // player chose, so the oscillator carrying the note stays there.
+            const auto onTheKey = r.style == "Keys" || r.style == "Lead";
             const auto roll = uniform (rng);
-            if (roll < 0.86f)
+            if (roll < 0.86f || onTheKey)
                 settings["osc_1_transpose"] = 0.0;
             else
                 settings["osc_1_transpose"] = lowRegister ? -12.0
@@ -1625,6 +1631,76 @@ namespace gen
             settings[typeKey] = (double) chosen->type;
             const auto amount = settings.value (amountKey, 0.5);
             settings[amountKey] = juce::jlimit ((double) chosen->low, (double) chosen->high, amount);
+        }
+    }
+
+    void Generator::keepTheNoteInFront (const Request& r, nlohmann::json& settings)
+    {
+        /*  Octaves support the note, they do not lead it.
+
+            Somebody pressing a key on one octave expects to hear that octave.
+            The axes draw every oscillator level from the same wide range, so
+            the octave below or above could come out louder than oscillator one
+            and the patch read as a different register from the key pressed.
+
+            Level with the note is allowed and is often the best part of a
+            patch: a keys preset with the octave either side within a decibel
+            or two of the note, both wider than it, got its whole size from
+            them. Halving them, which this first did, took that away along with
+            the fault. So the limit is only that a layer is never louder than
+            the note.
+        */
+        if (r.style != "Keys" && r.style != "Lead")
+            return;
+        if (r.base != nullptr || r.locks.count (schema::Section::osc) > 0)
+            return;
+
+        /*  A held lead also must not whistle.
+
+            An octave stack on a layer already transposed puts a voice two
+            octaves from the note, and with harmonic stretch on that layer its
+            partials land far above anything the note has. A sustained lead
+            rang at 16 kHz from exactly that pairing, and taking away any one
+            part of it removed the ring. Keys decay before it is heard, so they
+            keep the combination.
+        */
+        const auto held = r.style == "Lead";
+
+        const auto note = settings.value ("osc_1_level", 0.0);
+        for (int n = 2; n <= 3; ++n)
+        {
+            const auto osc = "osc_" + std::to_string (n);
+            if (settings.value (osc + "_on", 0.0) < 0.5)
+                continue;
+
+            const auto transposed = std::abs (settings.value (osc + "_transpose", 0.0)) > 0.5;
+            const auto stack = (int) std::lround (settings.value (osc + "_stack_style", 0.0));
+            const auto octaveStack = stack == 3 || stack == 4;
+
+            if (held && transposed && octaveStack)
+                settings[osc + "_stack_style"] = 0.0;
+
+            // Harmonic stretch only goes up, so above the note it is swapped
+            // for the low pass, which keeps the layer under the note's top.
+            if (held && settings.value (osc + "_transpose", 0.0) > 0.5
+                && (int) std::lround (settings.value (osc + "_spectral_morph_type", 0.0)) == 3)
+            {
+                settings[osc + "_spectral_morph_type"] = 7.0;
+                settings[osc + "_spectral_morph_amount"]
+                    = juce::jlimit (0.35, 0.7, settings.value (osc + "_spectral_morph_amount", 0.5));
+            }
+
+            /*  Above the note, a held lead keeps it to half.
+
+                A lead with the octave above at 0.83 of the note read as the
+                higher octave once the key was held, and was fine with that one
+                layer brought down. Below the note, and anywhere in keys, level
+                with the note is still allowed.
+            */
+            const auto above = settings.value (osc + "_transpose", 0.0) > 0.5 || octaveStack;
+            const auto most = held && above ? 0.5 * note : note;
+            if ((transposed || octaveStack) && settings.value (osc + "_level", 0.0) > most)
+                settings[osc + "_level"] = most;
         }
     }
 
@@ -2939,6 +3015,7 @@ namespace gen
         switchDistortion (r, settings);
         chooseWarp (r, settings, seed);
         chooseMorph (r, settings, seed);
+        keepTheNoteInFront (r, settings);
         chooseEffectModes (r, settings, seed);
         if (r.base == nullptr)
             wireRouting (*style, r, settings, srng);

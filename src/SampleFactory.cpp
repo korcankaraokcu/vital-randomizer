@@ -46,6 +46,18 @@ namespace sampler
 
             Sixteen beats at 120 BPM, which is four bars.
         */
+        /*  The pitch a keytracked sample has to be built at.
+
+            Vital plays a sample at its own speed on middle C and transposes
+            from there, which was measured rather than assumed: a 220 Hz sine
+            came back at 110, 220 and 440 on C3, C4 and C5. A pitched layer
+            built anywhere else sounds at a fixed interval from every key, and
+            the pluck and the struck body used to draw their root between 70
+            and 600 Hz, so under a lead they played a seventh or a ninth away
+            from the note rather than on it.
+        */
+        constexpr float kRootHz = 261.6256f;
+
         constexpr int kLoopRate = 22050;
         constexpr int kLoopSeconds = 8;
         constexpr int kLoopLength = kLoopRate * kLoopSeconds;
@@ -249,8 +261,7 @@ namespace sampler
         {
             std::vector<float> a ((size_t) kLength, 0.0f);
 
-            const auto root = juce::jmap (r.bright, 0.0f, 1.0f, 70.0f, 520.0f)
-                                  * uniform (rng, 0.8f, 1.25f);
+            const auto root = kRootHz;
             // The upper bound has to stay above the lower one. At a complexity
             // of zero this asked for between five and four partials, which is
             // undefined rather than empty, and produced an eleven millisecond
@@ -314,9 +325,22 @@ namespace sampler
         {
             std::vector<float> a ((size_t) kLength, 0.0f);
 
-            const auto hz = juce::jmap (r.bright, 0.0f, 1.0f, 80.0f, 600.0f)
-                                * uniform (rng, 0.8f, 1.25f);
-            const auto n = std::max (8, (int) std::lround (kRate / hz));
+            const auto hz = kRootHz;
+
+            // Damping decides how long it rings and how fast the top goes.
+            const auto damping = juce::jmap (r.complexity, 0.0f, 1.0f, 0.986f, 0.9995f);
+            const auto tone = uniform (rng, 0.35f, 0.5f);
+
+            /*  A whole number of samples round the loop is up to five cents
+                out at this pitch, and the averaging filter adds most of a
+                sample on top. What is left over after both goes through an
+                allpass, which delays by a fraction of a sample without
+                touching the level, so the string lands on the note.
+            */
+            const auto period = (float) kRate / hz - (1.0f - tone);
+            const auto n = std::max (8, (int) std::floor (period - 0.1f));
+            const auto fraction = period - (float) n;
+            const auto allpass = (1.0f - fraction) / (1.0f + fraction);
             std::vector<float> loopBuf ((size_t) n);
 
             // How bright the pluck starts. A pick near the bridge is thin and
@@ -328,18 +352,17 @@ namespace sampler
             for (auto& x : loopBuf)
                 x = pick (white (rng));
 
-            // Damping decides how long it rings and how fast the top goes.
-            const auto damping = juce::jmap (r.complexity, 0.0f, 1.0f, 0.986f, 0.9995f);
-            const auto tone = uniform (rng, 0.35f, 0.5f);
-
-            float previous = 0.0f;
+            float previous = 0.0f, allpassIn = 0.0f, allpassOut = 0.0f;
             for (int i = 0; i < kLength; ++i)
             {
                 const auto index = (size_t) (i % n);
                 const auto current = loopBuf[index];
-                const auto filtered = tone * current + (1.0f - tone) * previous;
+                const auto filtered = (tone * current + (1.0f - tone) * previous) * damping;
                 previous = current;
-                loopBuf[index] = filtered * damping;
+                const auto shifted = allpass * filtered + allpassIn - allpass * allpassOut;
+                allpassIn = filtered;
+                allpassOut = shifted;
+                loopBuf[index] = shifted;
                 a[(size_t) i] = current;
             }
 
