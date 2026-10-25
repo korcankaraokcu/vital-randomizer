@@ -513,6 +513,68 @@ namespace gen
         settings["sample_level"] = built.level;
     }
 
+    wavetable::Request Generator::tableRequest (const Request& r, int oscillator)
+    {
+        const auto sliderOr = [&r] (const char* key, float fallback)
+        {
+            const auto it = r.sliders.find (key);
+            return it == r.sliders.end() ? fallback : it->second;
+        };
+
+        wavetable::Request wr;
+        wr.style = r.style;
+        wr.bright = sliderOr ("bright", 0.5f);
+        wr.dirt = sliderOr ("dirt", 0.5f);
+        wr.move = sliderOr ("move", 0.5f);
+        wr.complexity = sliderOr ("complexity", 0.5f);
+        wr.oscillator = oscillator;
+        if (const auto* k = drums::at (r.drumKind))
+        {
+            wr.character = k->character;
+            wr.inharmonicLow = k->inharmonic.low;
+            wr.inharmonicHigh = k->inharmonic.high;
+        }
+        return wr;
+    }
+
+    void Generator::fitContentToSwitches (const Request& r, nlohmann::json& settings,
+                                          std::mt19937& tableRng, std::mt19937& sampleRng)
+    {
+        /*  A switched off oscillator still carries its whole wavetable, and a
+            switched off sample layer its whole sample, which at a low COMPLEX
+            is most of the file for nothing that plays. Those get a stand-in a
+            few hundred bytes long instead.
+
+            The other way round matters on VARY, which keeps the content of
+            the patch it started from: an oscillator switched back on there
+            would play the stand-in, so it gets a table of its own.
+        */
+        if (settings.contains ("wavetables") && settings["wavetables"].is_array())
+        {
+            auto& tables = settings["wavetables"];
+            for (int i = 1; i <= 3 && i <= (int) tables.size(); ++i)
+            {
+                auto& table = tables[(size_t) i - 1];
+                const auto on = settings.value ("osc_" + std::to_string (i) + "_on", 0.0) >= 0.5;
+                const auto unused = table.is_object()
+                                    && table.value ("name", std::string {}) == wavetable::kUnusedName;
+                if (! on)
+                    table = wavetable::createUnused();
+                else if (unused)
+                    table = wavetable::create (tableRng, tableRequest (r, i));
+            }
+        }
+
+        const auto sampleOn = settings.value ("sample_on", 0.0) >= 0.5;
+        const auto sampleUnused = settings.contains ("sample") && settings["sample"].is_object()
+                                  && settings["sample"].value ("name", std::string {})
+                                         == sampler::kUnusedName;
+        if (! sampleOn)
+            settings["sample"] = sampler::createUnused();
+        else if (sampleUnused)
+            synthesiseSample (r, settings, sampleRng);
+    }
+
     void Generator::synthesiseContent (const Request& r, nlohmann::json& settings,
                                        std::mt19937& rng)
     {
@@ -521,10 +583,7 @@ namespace gen
             const auto it = r.sliders.find (key);
             return it == r.sliders.end() ? fallback : it->second;
         };
-        const auto bright = sliderOr ("bright", 0.5f);
-        const auto dirt = sliderOr ("dirt", 0.5f);
         const auto move = sliderOr ("move", 0.5f);
-        const auto complexity = sliderOr ("complexity", 0.5f);
 
         /*  Wavetables are written rather than borrowed. That is a licensing
             matter first, since a table lifted out of a preset belongs to
@@ -533,22 +592,7 @@ namespace gen
         */
         nlohmann::json tables = nlohmann::json::array();
         for (int i = 1; i <= 3; ++i)
-        {
-            wavetable::Request wr;
-            wr.style = r.style;
-            wr.bright = bright;
-            wr.dirt = dirt;
-            wr.move = move;
-            wr.complexity = complexity;
-            wr.oscillator = i;
-            if (const auto* k = drums::at (r.drumKind))
-            {
-                wr.character = k->character;
-                wr.inharmonicLow = k->inharmonic.low;
-                wr.inharmonicHigh = k->inharmonic.high;
-            }
-            tables.push_back (wavetable::create (rng, wr));
-        }
+            tables.push_back (wavetable::create (rng, tableRequest (r, i)));
         settings["wavetables"] = std::move (tables);
 
         if (settings.contains ("lfos") && settings["lfos"].is_array())
@@ -3029,6 +3073,7 @@ namespace gen
         shapeDrum (r, settings, seed);
         constrainPitch (r, settings, srng, result.scale);
         result.repairs = repair (settings, r.drumKind);
+        fitContentToSwitches (r, settings, contentrng, samplerng);
 
         result.preset["preset_style"] = r.style;
         result.preset["preset_name"] = r.name;

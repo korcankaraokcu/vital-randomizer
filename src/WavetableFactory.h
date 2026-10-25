@@ -38,6 +38,15 @@ namespace wavetable
     /** A complete wavetable object, ready to drop into settings["wavetables"]. */
     nlohmann::json create (std::mt19937& rng, const Request& request);
 
+    /*  What an oscillator that is switched off carries.
+
+        Its table is never heard, but a generated one is several frames of
+        wave data and makes up most of a patch file. The name marks it, so a
+        VARY that switches the oscillator back on knows to write a real one.
+    */
+    inline constexpr const char* kUnusedName = "Unused";
+    nlohmann::json createUnused();
+
     /** A plain LFO shape, generated the same way and for the same reasons. */
     nlohmann::json createLfoShape (std::mt19937& rng, float move);
 

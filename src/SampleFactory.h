@@ -68,6 +68,13 @@ namespace sampler
     /** One second of audio built from a model chosen to suit the style. */
     Result create (std::mt19937& rng, const Request& request);
 
+    /*  What the sample layer carries while it is switched off. A few samples
+        of silence rather than a generated layer, which is the largest single
+        thing in a patch file. Named so a VARY that switches the layer on
+        knows to build a real one. */
+    inline constexpr const char* kUnusedName = "Unused";
+    nlohmann::json createUnused();
+
     /** Every model there is, in the order they were written. */
     std::vector<std::string> modelNames();
 }

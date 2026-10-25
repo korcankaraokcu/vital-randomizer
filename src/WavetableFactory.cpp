@@ -369,6 +369,40 @@ namespace wavetable
         return table;
     }
 
+    nlohmann::json createUnused()
+    {
+        /*  A Line Source is a handful of numbers where a Wave Source frame is
+            2048 floats, and Vital writes a frame back out at that size however
+            plain the wave. Two points make a saw, which is also what Vital
+            starts an oscillator on, so switching one on later still plays. */
+        nlohmann::json line;
+        line["name"] = "Linear";
+        line["num_points"] = 2;
+        line["points"] = { 0.0, 1.0, 1.0, 0.0 };
+        line["powers"] = { 0.0, 0.0 };
+        line["smooth"] = false;
+
+        nlohmann::json kf;
+        kf["position"] = 0;
+        kf["pull_power"] = 0.0;
+        kf["line"] = std::move (line);
+
+        auto component = makeComponent ("Line Source", nlohmann::json::array ({ std::move (kf) }));
+        component["num_points"] = 2;
+
+        nlohmann::json group;
+        group["components"] = nlohmann::json::array ({ std::move (component) });
+
+        nlohmann::json table;
+        table["author"] = "";
+        table["full_normalize"] = true;
+        table["remove_all_dc"] = true;
+        table["name"] = kUnusedName;
+        table["version"] = "1.0.7";
+        table["groups"] = nlohmann::json::array ({ std::move (group) });
+        return table;
+    }
+
     std::vector<std::string> stepGestureNames()
     {
         return { "run", "arpeggio", "wander", "motif", "pedal" };

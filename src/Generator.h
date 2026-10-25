@@ -11,6 +11,7 @@
 
 #include "Archetypes.h"
 #include "Schema.h"
+#include "WavetableFactory.h"
 
 /*
     Builds a Vital patch.
@@ -113,6 +114,11 @@ namespace gen
                                std::mt19937& rng);
         void synthesiseContent (const Request& r, nlohmann::json& settings,
                                 std::mt19937& rng);
+        static wavetable::Request tableRequest (const Request& r, int oscillator);
+        /** Swap the content of whatever is switched off for a small stand-in,
+            and give anything switched on over a stand-in real content. */
+        void fitContentToSwitches (const Request& r, nlohmann::json& settings,
+                                   std::mt19937& tableRng, std::mt19937& sampleRng);
         void applyAxes (const Request& r, nlohmann::json& settings, std::mt19937& rng);
         void applyNoteShape (const Request& r, nlohmann::json& settings, std::mt19937& rng);
         void wireRouting (const archetype::Archetype& a, const Request& r,

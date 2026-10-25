@@ -13,6 +13,7 @@ namespace sampler
     {
         constexpr int kRate = 44100;
         constexpr int kLength = kRate;      // one second, which is what Vital ships
+        constexpr int kUnusedLength = 1;
 
         /*  A loop that is a whole bar.
 
@@ -1160,6 +1161,11 @@ namespace sampler
                                     .toStdString();
             return sample;
         }
+    }
+
+    nlohmann::json createUnused()
+    {
+        return encode (std::vector<float> (kUnusedLength, 0.0f), kUnusedName, kRate);
     }
 
     std::vector<std::string> modelNames()
