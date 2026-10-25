@@ -44,6 +44,9 @@ namespace gen
         float complexityWobble = 1.0f;
         std::set<schema::Section> locks;
         const nlohmann::json* base = nullptr;             // VARY starts from this
+        /*  On a fresh roll, the patch the locked sections are kept from.
+            Without it a locked section is left at Vital's init values. */
+        const nlohmann::json* keepFrom = nullptr;
         /*  On VARY, the sections whose settings may move. The LFO rates and the
             modulation depths move as well, in varyMotion, unless their own
             sections are locked. */
@@ -109,6 +112,9 @@ namespace gen
     private:
         void applyArchetype (const archetype::Archetype& a, const Request& r,
                              nlohmann::json& settings);
+        /** Copy every locked section, its content included, from the patch
+            a fresh roll keeps them from. */
+        static void carryLockedSections (const Request& r, nlohmann::json& settings);
         void applyComplexity (const Request& r, nlohmann::json& settings, std::mt19937& rng);
         void synthesiseSample (const Request& r, nlohmann::json& settings,
                                std::mt19937& rng);

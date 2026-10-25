@@ -49,7 +49,12 @@ namespace store
 
         auto request = recipe.toRequest();
         if (! from.is_null())
-            request.base = &from;
+        {
+            if (recipe.keepsLocked)
+                request.keepFrom = &from;
+            else
+                request.base = &from;
+        }
 
         auto result = generator.roll (request);
         if (result.ok && recipe.volume >= 0.0f && result.preset.contains ("settings"))
@@ -88,6 +93,8 @@ namespace store
         j["volume"] = volume;
         if (! varySections.empty())
             j["vary_sections"] = varySections;
+        if (keepsLocked)
+            j["keeps_locked"] = true;
         for (const auto& s : sliders)
             j["sliders"][s.first] = s.second;
         return j;
@@ -107,6 +114,7 @@ namespace store
             r.varySections = j["vary_sections"].get<std::vector<std::string>>();
         if (j.contains ("locks") && j["locks"].is_array())
             r.locks = j["locks"].get<std::vector<std::string>>();
+        r.keepsLocked = j.value ("keeps_locked", false);
         if (j.contains ("sliders") && j["sliders"].is_object())
             for (auto it = j["sliders"].begin(); it != j["sliders"].end(); ++it)
                 r.sliders.emplace_back (it.key(), it.value().get<float>());

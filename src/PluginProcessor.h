@@ -197,6 +197,9 @@ private:
         made by hand in Vital. A VARY records it as what it started from. */
     std::shared_ptr<const store::Recipe> liveRecipe;
     juce::CriticalSection livePresetLock;
+    // Moves on whenever livePreset is replaced, so a prefetched locked roll
+    // can tell whether it was built against the patch still playing.
+    std::atomic<juce::uint64> livePresetSerial { 0 };
     juce::String auditionSummary;
 
     void loadVitalNow();

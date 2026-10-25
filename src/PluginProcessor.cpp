@@ -346,6 +346,14 @@ gen::Result VitalRandomizerProcessor::rollScreened (Job job)
         gen::Result best;
         float bestScore = -1.0f;
 
+        // A copy, because the live patch can change while this is rolling.
+        nlohmann::json keepFrom;
+        if (job != Job::vary)
+        {
+            const juce::ScopedLock sl (livePresetLock);
+            keepFrom = livePreset;
+        }
+
         for (int attempt = 0; attempt < maxAttempts; ++attempt)
         {
             auto request = buildRequest();
@@ -367,6 +375,8 @@ gen::Result VitalRandomizerProcessor::rollScreened (Job job)
             else
             {
                 request.amount = 1.0f;
+                if (! request.locks.empty() && ! keepFrom.is_null())
+                    request.keepFrom = &keepFrom;
                 result = generator->roll (request);
             }
 
@@ -400,6 +410,10 @@ juce::String VitalRandomizerProcessor::requestSignature() const
         s << "|" << slider.first << "=" << juce::String (slider.second, 3);
     for (const auto& lock : locks)
         s << "|L" << (int) lock;
+    // A locked section comes from the patch playing, so a candidate built
+    // against another one has the wrong sections in it.
+    if (! locks.empty())
+        s << "|P" << (juce::int64) livePresetSerial.load();
     for (const auto scale : scales)
         s << "|S" << scale;
     for (const auto kind : drumKinds)
@@ -448,14 +462,18 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
 
         {
             const juce::ScopedLock sl (livePresetLock);
+            // A locked roll replays from the patch its locked sections came
+            // from, the way a VARY replays from the patch it moved.
+            recipe.keepsLocked = ! varied && ! request.locks.empty() && ! livePreset.is_null();
             if (varied)
+                for (const auto s : varySections())
+                    recipe.varySections.push_back (schema::sectionName (s));
+            if (varied || recipe.keepsLocked)
             {
                 /*  A long run of VARYs is kept short by writing the patch down
                     every so often, since replaying one means replaying every
                     step before it. */
                 constexpr int kLongestChain = 64;
-                for (const auto s : varySections())
-                    recipe.varySections.push_back (schema::sectionName (s));
                 if (liveRecipe != nullptr && liveRecipe->chainLength() < kLongestChain)
                     recipe.variedFrom = liveRecipe;
                 else if (! livePreset.is_null())
@@ -477,6 +495,7 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
     {
         const juce::ScopedLock sl (livePresetLock);
         livePreset = result.preset;
+        ++livePresetSerial;
     }
 
     juce::StringArray names;
@@ -833,6 +852,7 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
     {
         const juce::ScopedLock sl (livePresetLock);
         livePreset = j["preset"];
+        ++livePresetSerial;
         // Saved from Vital as it was playing, so it may carry hand edits that
         // no recipe reproduces.
         liveRecipe = nullptr;

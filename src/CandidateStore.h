@@ -73,8 +73,14 @@ namespace store
         std::shared_ptr<const Recipe> variedFrom;
         std::shared_ptr<const nlohmann::json> variedFromPatch;
         std::vector<std::string> varySections;
+        /*  A fresh roll with a section locked keeps that section from the
+            patch that was playing, so it needs that patch to replay just as a
+            VARY does. It is held the same way, and this says the link is
+            where the locked sections came from rather than a patch moved. */
+        bool keepsLocked = false;
 
-        /** How many VARYs deep this is, 0 for a fresh roll. */
+        /** How many links back to a roll that stands on its own, 0 for a
+            fresh roll with nothing locked. */
         int chainLength() const;
 
         gen::Request toRequest() const;

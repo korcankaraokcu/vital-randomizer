@@ -316,6 +316,52 @@ namespace gen
         }
     }
 
+    void Generator::carryLockedSections (const Request& r, nlohmann::json& settings)
+    {
+        /*  A lock means the section stays as it is.
+
+            A fresh roll starts from Vital's init patch and every step leaves a
+            locked section alone, so on its own a lock used to leave the
+            section at init rather than at what was playing. And the content
+            was not covered by the lock at all: the wavetables, the sample,
+            the LFO shapes and the routings were all built new. So the locked
+            sections are copied over from the patch that was playing, content
+            and all. This runs before anything is built, so the rest of the
+            patch is drawn around them, and again before the repair, because
+            a few steps write across sections without asking, the riff of a
+            sequence among them.
+        */
+        if (r.base != nullptr || r.keepFrom == nullptr || r.locks.empty()
+            || ! r.keepFrom->contains ("settings") || ! (*r.keepFrom)["settings"].is_object())
+            return;
+
+        const auto& from = (*r.keepFrom)["settings"];
+        for (auto it = from.begin(); it != from.end(); ++it)
+        {
+            const auto& key = it.key();
+            auto locked = false;
+            if (it.value().is_number())
+            {
+                const auto section = schema::sectionOf (key);
+                locked = section != schema::Section::excluded && r.locks.count (section) > 0;
+            }
+            else if (key == "modulations")
+            {
+                // The routings and their amounts are one thing, and the
+                // amounts are numbered modulation parameters.
+                locked = r.locks.count (schema::Section::mod) > 0;
+            }
+            else
+            {
+                for (const auto& blob : schema::blobNames())
+                    if (key == blob)
+                        locked = r.locks.count (schema::blobOwner (blob)) > 0;
+            }
+            if (locked)
+                settings[key] = it.value();
+        }
+    }
+
     void Generator::applyComplexity (const Request& r, nlohmann::json& settings,
                                      std::mt19937& rng)
     {
@@ -590,17 +636,25 @@ namespace gen
             whoever made the pack, but it is also where the variety comes from:
             a fixed set of tables means the same timbres keep turning up.
         */
+        /*  Built even where a lock keeps what was there, so a seed draws the
+            same LFO shapes with a section locked as without. */
         nlohmann::json tables = nlohmann::json::array();
         for (int i = 1; i <= 3; ++i)
             tables.push_back (wavetable::create (rng, tableRequest (r, i)));
-        settings["wavetables"] = std::move (tables);
+        if (r.locks.count (schema::Section::osc) == 0)
+            settings["wavetables"] = std::move (tables);
 
         if (settings.contains ("lfos") && settings["lfos"].is_array())
         {
             auto& lfos = settings["lfos"];
+            const auto lfoFree = r.locks.count (schema::Section::lfo) == 0;
             for (size_t i = 0; i < lfos.size(); ++i)
                 if (i < 4 || uniform (rng) < 0.5f)
-                    lfos[i] = wavetable::createLfoShape (rng, move);
+                {
+                    auto shape = wavetable::createLfoShape (rng, move);
+                    if (lfoFree)
+                        lfos[i] = std::move (shape);
+                }
         }
     }
 
@@ -3043,6 +3097,7 @@ namespace gen
             for (const auto& slot : { "modulations" })
                 settings.erase (slot);
             ensureModSlots (settings);
+            carryLockedSections (r, settings);
             applyArchetype (*style, r, settings);
             applyComplexity (r, settings, srng);
             synthesiseSample (r, settings, samplerng);
@@ -3072,6 +3127,7 @@ namespace gen
         applyNoteShape (r, settings, prng);
         shapeDrum (r, settings, seed);
         constrainPitch (r, settings, srng, result.scale);
+        carryLockedSections (r, settings);
         result.repairs = repair (settings, r.drumKind);
         fitContentToSwitches (r, settings, contentrng, samplerng);
 
