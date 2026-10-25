@@ -118,6 +118,54 @@ be rolled again on the next.
         return o;
     }
 
+    /*  Anything a command does not know is an error, not something to skip.
+
+        An option it did not recognise used to be ignored, so a typo such as
+        --stlyes=Bass or -seed=12 went unnoticed and the batch quietly came out
+        with every style or a random seed.
+    */
+    bool checkOptions (const std::string& command, const Options& o)
+    {
+        const std::map<std::string, std::set<std::string>> known = {
+            { "roll",    { "styles", "count", "drums", "scales", "bright", "move", "dirt",
+                           "space", "complexity", "seed", "out", "into-vital", "name", "vital" } },
+            { "vary",    { "count", "depth", "seed", "out", "into-vital", "name", "vital" } },
+            { "measure", { "vital" } },
+        };
+        // What each command takes besides options: vary a preset, measure a folder.
+        const std::map<std::string, size_t> loose = { { "roll", 0 }, { "vary", 1 }, { "measure", 1 } };
+
+        const auto& allowed = known.at (command);
+        for (const auto& v : o.values)
+        {
+            if (v.first == "help" || allowed.count (v.first) > 0)
+                continue;
+            std::cerr << "Unknown option \"--" << v.first << "\" for vrgen " << command
+                      << ". Run vrgen --help for the options.\n";
+            return false;
+        }
+
+        size_t extra = 0;
+        for (const auto& a : o.loose)
+        {
+            if (a.size() > 1 && a[0] == '-')
+            {
+                std::cerr << "Unknown option \"" << a << "\". Options start with two dashes";
+                if (a.size() > 2)
+                    std::cerr << ", as in \"-" << a << "\"";
+                std::cerr << ".\n";
+                return false;
+            }
+            if (++extra > loose.at (command))
+            {
+                std::cerr << "vrgen " << command << " did not expect \"" << a
+                          << "\". Run vrgen --help for how to use it.\n";
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::vector<std::string> splitList (const std::string& s)
     {
         std::vector<std::string> out;
@@ -668,12 +716,26 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // Options with no command in front of them, most likely a roll.
+    if (command.rfind ("-", 0) == 0)
+    {
+        std::string args;
+        for (int i = 1; i < argc; ++i)
+            args += std::string (" ") + argv[i];
+        std::cerr << "Missing command. Did you mean: vrgen roll" << args << "\n"
+                  << "Run vrgen --help for the commands.\n";
+        return 1;
+    }
+
     const auto options = parse (argc, argv, 2);
     if (options.has ("help"))
     {
         std::cout << kHelp;
         return 0;
     }
+    if ((command == "roll" || command == "vary" || command == "measure")
+        && ! checkOptions (command, options))
+        return 1;
     if (command == "roll")
         return roll (options);
     if (command == "vary")
