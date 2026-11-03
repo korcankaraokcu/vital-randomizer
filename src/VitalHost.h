@@ -100,6 +100,14 @@ private:
     juce::File pluginFile;
 
     juce::CriticalSection processLock;
+    /*  Held by anything that reads or replaces Vital's state, and never by the
+        audio thread. Reading the state takes up to forty milliseconds, and
+        holding processLock for it silenced the audio for that long. Vital
+        keeps playing while its state is read, the way it does when a DAW
+        saves a project, so a read only has to keep a load from running at
+        the same time and the instance from going away under it.
+        Taken before processLock wherever both are held. */
+    mutable juce::CriticalSection stateLock;
     mutable juce::CriticalSection templateLock;
     juce::MemoryBlock cachedTemplate;
 

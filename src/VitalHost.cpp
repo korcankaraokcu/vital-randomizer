@@ -10,6 +10,7 @@ VitalHost::VitalHost()
 VitalHost::~VitalHost()
 {
     release();
+    const juce::ScopedLock state (stateLock);
     const juce::ScopedLock sl (processLock);
     instance.reset();
 }
@@ -79,6 +80,7 @@ bool VitalHost::load (const juce::File& vst3, double sampleRate, int blockSize,
     created->prepareToPlay (sampleRate, blockSize);
 
     {
+        const juce::ScopedLock state (stateLock);
         const juce::ScopedLock sl (processLock);
         instance = std::move (created);
         pluginFile = vst3;
@@ -159,6 +161,7 @@ bool VitalHost::applyPreset (const nlohmann::json& preset)
     if (blob.getSize() == 0)
         return false;
 
+    const juce::ScopedLock state (stateLock);
     const juce::ScopedLock sl (processLock);
     if (instance == nullptr)
         return false;
@@ -189,7 +192,8 @@ nlohmann::json VitalHost::currentPreset() const
 {
     juce::MemoryBlock state;
     {
-        const juce::ScopedLock sl (const_cast<juce::CriticalSection&> (processLock));
+        // Not processLock, so Vital keeps playing while it is read.
+        const juce::ScopedLock sl (stateLock);
         if (instance == nullptr)
             return {};
         instance->getStateInformation (state);
