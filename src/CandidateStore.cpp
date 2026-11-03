@@ -55,6 +55,12 @@ namespace store
             else
                 request.base = &from;
         }
+        nlohmann::json kept;
+        if (recipe.lockedState != nullptr)
+        {
+            kept["settings"] = *recipe.lockedState;
+            request.keepFrom = &kept;
+        }
 
         auto result = generator.roll (request);
         if (result.ok && recipe.volume >= 0.0f && result.preset.contains ("settings"))
@@ -226,6 +232,25 @@ namespace store
             it and grow with the square of the chain. Links go in a table,
             parents before children, and a recipe names its parent by index.
         */
+        /*  The locked sections, each written once the same way. A run of
+            rolls with OSC locked shares one, and written per roll it would put
+            the same wavetables in the file a thousand times over.
+        */
+        nlohmann::json states = nlohmann::json::array();
+        std::map<const nlohmann::json*, int> statesWritten;
+        const auto stateOf = [&] (const std::shared_ptr<const nlohmann::json>& s) -> int
+        {
+            if (s == nullptr)
+                return -1;
+            const auto found = statesWritten.find (s.get());
+            if (found != statesWritten.end())
+                return found->second;
+            const auto id = (int) states.size();
+            states.push_back (*s);
+            statesWritten[s.get()] = id;
+            return id;
+        };
+
         nlohmann::json links = nlohmann::json::array();
         std::map<const Recipe*, int> written;
         std::function<int (const std::shared_ptr<const Recipe>&)> linkOf;
@@ -241,6 +266,8 @@ namespace store
             node["varied_from"] = parent;
             if (r->variedFromPatch != nullptr)
                 node["varied_from_patch"] = *r->variedFromPatch;
+            if (r->lockedState != nullptr)
+                node["locked_state"] = stateOf (r->lockedState);
             const auto id = (int) links.size();
             links.push_back (std::move (node));
             written[r.get()] = id;
@@ -252,6 +279,8 @@ namespace store
             e["varied_from"] = linkOf (r.variedFrom);
             if (r.variedFromPatch != nullptr)
                 e["varied_from_patch"] = *r.variedFromPatch;
+            if (r.lockedState != nullptr)
+                e["locked_state"] = stateOf (r.lockedState);
             return e;
         };
 
@@ -271,6 +300,8 @@ namespace store
                               { "preset", k.preset } });
         j["keepers"] = std::move (keep);
         j["links"] = std::move (links);
+        if (! states.empty())
+            j["locked_states"] = std::move (states);
         return j;
     }
 
@@ -281,8 +312,13 @@ namespace store
         limit = j.value ("limit", size_t { 1000 });
         position = j.value ("position", -1);
 
+        std::vector<std::shared_ptr<const nlohmann::json>> states;
+        if (j.contains ("locked_states") && j["locked_states"].is_array())
+            for (const auto& s : j["locked_states"])
+                states.push_back (std::make_shared<const nlohmann::json> (s));
+
         std::vector<std::shared_ptr<const Recipe>> links;
-        const auto decode = [&links] (const nlohmann::json& e)
+        const auto decode = [&links, &states] (const nlohmann::json& e)
         {
             auto r = Recipe::fromJson (e);
             const auto parent = e.value ("varied_from", -1);
@@ -290,6 +326,9 @@ namespace store
                 r.variedFrom = links[(size_t) parent];
             if (e.contains ("varied_from_patch"))
                 r.variedFromPatch = std::make_shared<const nlohmann::json> (e["varied_from_patch"]);
+            const auto state = e.value ("locked_state", -1);
+            if (state >= 0 && state < (int) states.size())
+                r.lockedState = states[(size_t) state];
             return r;
         };
         // Parents were written before children, so one pass rebuilds them.

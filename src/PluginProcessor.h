@@ -126,12 +126,20 @@ private:
     void performRoll (Job job);
     /** Generate and screen until something passes. The slow half of a roll,
         and the half that can be done before the user asks for it. */
-    gen::Result rollScreened (Job job);
+    gen::Result rollScreened (Job job, const std::shared_ptr<const nlohmann::json>& locked);
     /** What a prefetched candidate has to still match to be usable. */
     juce::String requestSignature() const;
     void dropPrefetch();
     void setStatus (const juce::String& message, float progress, bool working);
-    void applyResult (gen::Result& result, bool pushToHistory, bool varied = false);
+    void applyResult (gen::Result& result, bool pushToHistory, bool varied = false,
+                      std::shared_ptr<const nlohmann::json> locked = nullptr);
+    /** The locked sections as Vital is playing them, edits by hand included,
+        or nothing when no section is locked. Reads Vital's state, which takes
+        tens of milliseconds but does not interrupt its audio. */
+    std::shared_ptr<const nlohmann::json> lockedNow();
+    /** The locked sections of a patch, shared with the last ones handed out
+        when nothing in them has changed. */
+    std::shared_ptr<const nlohmann::json> lockedFrom (const nlohmann::json& preset);
     gen::Request buildRequest() const;
     /** The sections VARY is allowed to move. */
     static std::set<schema::Section> varySections()
@@ -175,6 +183,9 @@ private:
     juce::CriticalSection prefetchLock;
     gen::Result prefetched;
     juce::String prefetchedFor;
+    // The locked sections it was built around, which have to still be what
+    // Vital is playing when ROLL is pressed.
+    std::shared_ptr<const nlohmann::json> prefetchedLocked;
 
     juce::String currentStyle { "Bass" };
     juce::CriticalSection settingsLock;
@@ -197,9 +208,7 @@ private:
         made by hand in Vital. A VARY records it as what it started from. */
     std::shared_ptr<const store::Recipe> liveRecipe;
     juce::CriticalSection livePresetLock;
-    // Moves on whenever livePreset is replaced, so a prefetched locked roll
-    // can tell whether it was built against the patch still playing.
-    std::atomic<juce::uint64> livePresetSerial { 0 };
+    std::shared_ptr<const nlohmann::json> lastLocked;
     juce::String auditionSummary;
 
     void loadVitalNow();

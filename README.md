@@ -46,8 +46,8 @@ terminal.
   much of the synth a patch uses.
 - **VARY** nudges the current patch instead of replacing it. The bar next to it
   sets how far.
-- **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it
-  alone.
+- **OSC / FILT / ENV / LFO / FX / MOD** lock a section so ROLL and VARY leave
+  it alone, including any changes you made to it in Vital.
 - **&lt; &gt;** walk the history and **KEEP** stars a patch for the KEPT row.
 - **SCALES** (Sequence) picks which scales a riff can use.
 - **DRUMS** (Percussion) picks which drums a roll can build: kick, snare, clap,

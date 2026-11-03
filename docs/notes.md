@@ -120,7 +120,7 @@ fresh install is all it needs. Then:
   This is where usable patches actually come from.
 - **BRIGHT / MOVE / DIRT / SPACE** set the character, and **COMPLEX** sets how
   much of the synth a patch may use.
-- **OSC / FILT / ENV / LFO / FX / MOD** lock a section so rolling leaves it be.
+- **OSC / FILT / ENV / LFO / FX / MOD** lock a section so ROLL and VARY leave it as Vital is playing it, hand edits included.
 - **< >** walk the candidate history and **KEEP** stars one so rolling cannot
   lose it. Starred patches sit in the KEPT row: click to load, right click to
   remove.

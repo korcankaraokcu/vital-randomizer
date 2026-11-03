@@ -73,10 +73,13 @@ namespace store
         std::shared_ptr<const Recipe> variedFrom;
         std::shared_ptr<const nlohmann::json> variedFromPatch;
         std::vector<std::string> varySections;
-        /*  A fresh roll with a section locked keeps that section from the
-            patch that was playing, so it needs that patch to replay just as a
-            VARY does. It is held the same way, and this says the link is
-            where the locked sections came from rather than a patch moved. */
+        /*  The locked sections as Vital had them when the roll or the VARY was
+            made, edits by hand included, which no recipe could rebuild. Only
+            what the locks cover, so it stays small unless OSC is locked and
+            it carries the wavetables. */
+        std::shared_ptr<const nlohmann::json> lockedState;
+        /*  Saved by 1.2.0 and 1.2.1, which kept a locked roll's sections from
+            the generated patch and held that patch as the link above. */
         bool keepsLocked = false;
 
         /** How many links back to a roll that stands on its own, 0 for a

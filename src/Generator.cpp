@@ -316,6 +316,40 @@ namespace gen
         }
     }
 
+    nlohmann::json Generator::lockedPart (const std::set<schema::Section>& locks,
+                                          const nlohmann::json& settings)
+    {
+        nlohmann::json part = nlohmann::json::object();
+        if (locks.empty() || ! settings.is_object())
+            return part;
+
+        for (auto it = settings.begin(); it != settings.end(); ++it)
+        {
+            const auto& key = it.key();
+            auto locked = false;
+            if (it.value().is_number())
+            {
+                const auto section = schema::sectionOf (key);
+                locked = section != schema::Section::excluded && locks.count (section) > 0;
+            }
+            else if (key == "modulations")
+            {
+                // The routings and their amounts are one thing, and the
+                // amounts are numbered modulation parameters.
+                locked = locks.count (schema::Section::mod) > 0;
+            }
+            else
+            {
+                for (const auto& blob : schema::blobNames())
+                    if (key == blob)
+                        locked = locks.count (schema::blobOwner (blob)) > 0;
+            }
+            if (locked)
+                part[key] = it.value();
+        }
+        return part;
+    }
+
     void Generator::carryLockedSections (const Request& r, nlohmann::json& settings)
     {
         /*  A lock means the section stays as it is.
@@ -330,36 +364,19 @@ namespace gen
             patch is drawn around them, and again before the repair, because
             a few steps write across sections without asking, the riff of a
             sequence among them.
+
+            The plugin hands over what Vital is playing rather than what was
+            generated, so an edit made by hand in a locked section survives a
+            ROLL and a VARY. A VARY carries them as well, since the patch it
+            moves is the generated one and would put the edit back.
         */
-        if (r.base != nullptr || r.keepFrom == nullptr || r.locks.empty()
+        if (r.keepFrom == nullptr || r.locks.empty()
             || ! r.keepFrom->contains ("settings") || ! (*r.keepFrom)["settings"].is_object())
             return;
 
-        const auto& from = (*r.keepFrom)["settings"];
-        for (auto it = from.begin(); it != from.end(); ++it)
-        {
-            const auto& key = it.key();
-            auto locked = false;
-            if (it.value().is_number())
-            {
-                const auto section = schema::sectionOf (key);
-                locked = section != schema::Section::excluded && r.locks.count (section) > 0;
-            }
-            else if (key == "modulations")
-            {
-                // The routings and their amounts are one thing, and the
-                // amounts are numbered modulation parameters.
-                locked = r.locks.count (schema::Section::mod) > 0;
-            }
-            else
-            {
-                for (const auto& blob : schema::blobNames())
-                    if (key == blob)
-                        locked = r.locks.count (schema::blobOwner (blob)) > 0;
-            }
-            if (locked)
-                settings[key] = it.value();
-        }
+        const auto part = lockedPart (r.locks, (*r.keepFrom)["settings"]);
+        for (auto it = part.begin(); it != part.end(); ++it)
+            settings[it.key()] = it.value();
     }
 
     void Generator::applyComplexity (const Request& r, nlohmann::json& settings,
@@ -3097,7 +3114,10 @@ namespace gen
             for (const auto& slot : { "modulations" })
                 settings.erase (slot);
             ensureModSlots (settings);
-            carryLockedSections (r, settings);
+        }
+        carryLockedSections (r, settings);
+        if (r.base == nullptr)
+        {
             applyArchetype (*style, r, settings);
             applyComplexity (r, settings, srng);
             synthesiseSample (r, settings, samplerng);

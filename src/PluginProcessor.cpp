@@ -199,13 +199,15 @@ void VitalRandomizerProcessor::run()
                     before the user rolls, the signature stops matching and it
                     is thrown away rather than handed over as a stale patch.
                 */
+                const auto locked = lockedNow();
                 const auto signature = requestSignature();
-                auto ready = rollScreened (Job::rollNew);
+                auto ready = rollScreened (Job::rollNew, locked);
                 if (ready.ok)
                 {
                     const juce::ScopedLock sl (prefetchLock);
                     prefetched = std::move (ready);
                     prefetchedFor = signature;
+                    prefetchedLocked = locked;
                 }
                 break;
             }
@@ -249,6 +251,7 @@ void VitalRandomizerProcessor::performRoll (Job job)
     sendChangeMessage();
 
     gen::Result result;
+    std::shared_ptr<const nlohmann::json> locked;
 
     if (job == Job::recall)
     {
@@ -286,22 +289,30 @@ void VitalRandomizerProcessor::performRoll (Job job)
     }
     else
     {
+        // Read once, here, so the locked sections are what is playing now.
+        locked = lockedNow();
+
         /*  A candidate prepared while the user was listening to the last one,
-            if the settings have not moved since it was built.
+            if the settings have not moved since it was built, and nothing
+            locked has been edited since either.
         */
         if (job == Job::rollNew)
         {
             const juce::ScopedLock sl (prefetchLock);
-            if (prefetched.ok && prefetchedFor == requestSignature())
+            const auto sameLocked = locked == nullptr
+                ? prefetchedLocked == nullptr
+                : prefetchedLocked != nullptr && *prefetchedLocked == *locked;
+            if (prefetched.ok && prefetchedFor == requestSignature() && sameLocked)
             {
                 result = std::move (prefetched);
                 prefetched = {};
                 prefetchedFor.clear();
+                prefetchedLocked = nullptr;
             }
         }
 
         if (! result.ok)
-            result = rollScreened (job);
+            result = rollScreened (job, locked);
     }
 
     if (! result.ok)
@@ -312,7 +323,7 @@ void VitalRandomizerProcessor::performRoll (Job job)
         return;
     }
 
-    applyResult (result, job == Job::rollNew || job == Job::vary, job == Job::vary);
+    applyResult (result, job == Job::rollNew || job == Job::vary, job == Job::vary, locked);
 
     // Start on the next one straight away, so the wait lands while the user is
     // playing this one rather than after they ask for another.
@@ -325,7 +336,8 @@ void VitalRandomizerProcessor::performRoll (Job job)
     }
 }
 
-gen::Result VitalRandomizerProcessor::rollScreened (Job job)
+gen::Result VitalRandomizerProcessor::rollScreened (Job job,
+                                                    const std::shared_ptr<const nlohmann::json>& locked)
 {
     gen::Result result;
 
@@ -346,17 +358,15 @@ gen::Result VitalRandomizerProcessor::rollScreened (Job job)
         gen::Result best;
         float bestScore = -1.0f;
 
-        // A copy, because the live patch can change while this is rolling.
         nlohmann::json keepFrom;
-        if (job != Job::vary)
-        {
-            const juce::ScopedLock sl (livePresetLock);
-            keepFrom = livePreset;
-        }
+        if (locked != nullptr)
+            keepFrom["settings"] = *locked;
 
         for (int attempt = 0; attempt < maxAttempts; ++attempt)
         {
             auto request = buildRequest();
+            if (locked != nullptr && ! request.locks.empty())
+                request.keepFrom = &keepFrom;
             if (job == Job::vary)
             {
                 const juce::ScopedLock sl (livePresetLock);
@@ -375,8 +385,6 @@ gen::Result VitalRandomizerProcessor::rollScreened (Job job)
             else
             {
                 request.amount = 1.0f;
-                if (! request.locks.empty() && ! keepFrom.is_null())
-                    request.keepFrom = &keepFrom;
                 result = generator->roll (request);
             }
 
@@ -410,10 +418,6 @@ juce::String VitalRandomizerProcessor::requestSignature() const
         s << "|" << slider.first << "=" << juce::String (slider.second, 3);
     for (const auto& lock : locks)
         s << "|L" << (int) lock;
-    // A locked section comes from the patch playing, so a candidate built
-    // against another one has the wrong sections in it.
-    if (! locks.empty())
-        s << "|P" << (juce::int64) livePresetSerial.load();
     for (const auto scale : scales)
         s << "|S" << scale;
     for (const auto kind : drumKinds)
@@ -426,6 +430,43 @@ void VitalRandomizerProcessor::dropPrefetch()
     const juce::ScopedLock sl (prefetchLock);
     prefetched = {};
     prefetchedFor.clear();
+    prefetchedLocked = nullptr;
+}
+
+std::shared_ptr<const nlohmann::json> VitalRandomizerProcessor::lockedNow()
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        if (locks.empty())
+            return nullptr;
+    }
+    auto now = host.currentPreset();
+    if (now.is_null() || ! now.contains ("settings"))
+    {
+        const juce::ScopedLock sl (livePresetLock);
+        now = livePreset;
+    }
+    return lockedFrom (now);
+}
+
+std::shared_ptr<const nlohmann::json> VitalRandomizerProcessor::lockedFrom (const nlohmann::json& preset)
+{
+    std::set<schema::Section> held;
+    {
+        const juce::ScopedLock sl (settingsLock);
+        held = locks;
+    }
+    if (held.empty() || preset.is_null() || ! preset.contains ("settings"))
+        return nullptr;
+
+    auto part = gen::Generator::lockedPart (held, preset["settings"]);
+    /*  One copy for as long as nothing locked changes. History keeps these,
+        and a run of rolls with OSC locked would otherwise hold the same
+        wavetables once per roll. */
+    const juce::ScopedLock sl (livePresetLock);
+    if (lastLocked == nullptr || *lastLocked != part)
+        lastLocked = std::make_shared<const nlohmann::json> (std::move (part));
+    return lastLocked;
 }
 
 bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measurement& measured)
@@ -445,7 +486,8 @@ bool VitalRandomizerProcessor::screen (gen::Result& result, audition::Measuremen
     return verdict.passed;
 }
 
-void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHistory, bool varied)
+void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHistory, bool varied,
+                                            std::shared_ptr<const nlohmann::json> locked)
 {
     if (pushToHistory)
     {
@@ -460,20 +502,20 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
         if (result.preset.contains ("settings"))
             recipe.volume = (float) result.preset["settings"].value ("volume", -1.0);
 
+        // The locked sections as they were played, so replaying the roll
+        // brings back an edit made by hand in one of them.
+        recipe.lockedState = std::move (locked);
+
         {
             const juce::ScopedLock sl (livePresetLock);
-            // A locked roll replays from the patch its locked sections came
-            // from, the way a VARY replays from the patch it moved.
-            recipe.keepsLocked = ! varied && ! request.locks.empty() && ! livePreset.is_null();
             if (varied)
-                for (const auto s : varySections())
-                    recipe.varySections.push_back (schema::sectionName (s));
-            if (varied || recipe.keepsLocked)
             {
                 /*  A long run of VARYs is kept short by writing the patch down
                     every so often, since replaying one means replaying every
                     step before it. */
                 constexpr int kLongestChain = 64;
+                for (const auto s : varySections())
+                    recipe.varySections.push_back (schema::sectionName (s));
                 if (liveRecipe != nullptr && liveRecipe->chainLength() < kLongestChain)
                     recipe.variedFrom = liveRecipe;
                 else if (! livePreset.is_null())
@@ -495,7 +537,6 @@ void VitalRandomizerProcessor::applyResult (gen::Result& result, bool pushToHist
     {
         const juce::ScopedLock sl (livePresetLock);
         livePreset = result.preset;
-        ++livePresetSerial;
     }
 
     juce::StringArray names;
@@ -852,7 +893,6 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
     {
         const juce::ScopedLock sl (livePresetLock);
         livePreset = j["preset"];
-        ++livePresetSerial;
         // Saved from Vital as it was playing, so it may carry hand edits that
         // no recipe reproduces.
         liveRecipe = nullptr;
