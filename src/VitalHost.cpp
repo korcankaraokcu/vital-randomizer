@@ -38,8 +38,66 @@ juce::Array<juce::File> VitalHost::searchPaths()
     return paths;
 }
 
+namespace
+{
+    juce::File settingsFile()
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                   .getChildFile ("Vital Randomizer").getChildFile ("settings.json");
+    }
+
+    nlohmann::json readSettings()
+    {
+        const auto file = settingsFile();
+        if (! file.existsAsFile())
+            return nlohmann::json::object();
+        auto j = nlohmann::json::parse (file.loadFileAsString().toStdString(), nullptr, false);
+        return j.is_object() ? j : nlohmann::json::object();
+    }
+}
+
+juce::File VitalHost::bundleFor (const juce::File& picked)
+{
+    /*  A VST3 is either a single file or a folder named like one, holding the
+        binary at Contents/<architecture>/Vital.vst3. A file dialog that picks
+        files can only pick that inner binary out of a folder, so it is taken
+        back up to the folder, which is what the plugin format expects. */
+    auto bundle = picked;
+    for (auto p = picked.getParentDirectory(); p != p.getParentDirectory(); p = p.getParentDirectory())
+        if (p.getFileName().endsWithIgnoreCase (".vst3") && p.getChildFile ("Contents").isDirectory())
+            bundle = p;
+    return bundle;
+}
+
+juce::File VitalHost::rememberedLocation()
+{
+    const auto j = readSettings();
+    const auto path = j.value ("vital", std::string {});
+    return path.empty() ? juce::File() : juce::File (juce::String (path));
+}
+
+void VitalHost::rememberLocation (const juce::File& vst3)
+{
+    if (vst3 == juce::File() || vst3 == rememberedLocation())
+        return;
+    auto j = readSettings();
+    j["vital"] = vst3.getFullPathName().toStdString();
+    const auto file = settingsFile();
+    file.getParentDirectory().createDirectory();
+    file.replaceWithText (juce::String (j.dump (2)));
+}
+
 juce::File VitalHost::findInstalled()
 {
+    /*  Where Vital was last found first, then the standard places.
+
+        A Vital installed somewhere else used to be located again in every new
+        project, because the location was only kept in the project it was
+        located in. */
+    const auto remembered = rememberedLocation();
+    if (remembered != juce::File() && remembered.exists())
+        return remembered;
+
     for (const auto& p : searchPaths())
         if (p.exists())
             return p;
@@ -107,6 +165,19 @@ bool VitalHost::load (const juce::File& vst3, double sampleRate, int blockSize,
     }
 
     return true;
+}
+
+void VitalHost::unload()
+{
+    const juce::ScopedLock state (stateLock);
+    const juce::ScopedLock sl (processLock);
+    if (instance != nullptr)
+        instance->releaseResources();
+    instance.reset();
+    pluginFile = juce::File();
+
+    const juce::ScopedLock tl (templateLock);
+    cachedTemplate.reset();
 }
 
 void VitalHost::prepare (double sampleRate, int blockSize)

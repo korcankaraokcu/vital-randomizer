@@ -66,6 +66,7 @@ Vital has to be installed.
                                so the batch shows up in Vital's browser
       --name="{style}_{n}"     file names: {style} {n} {kind} {scale} {seed}
       --vital=<path>           Vital.vst3, if it is not in a standard place
+                               and was never located in the plugin
 
   vrgen vary <preset.vital> [options]
       Neighbours of a preset you already like, as VARY does in the plugin.
@@ -302,7 +303,9 @@ be rolled again on the next.
 
         bool open (const Options& o)
         {
-            auto path = o.has ("vital") ? juce::File (juce::String (o.get ("vital"))) : VitalHost::findInstalled();
+            auto path = o.has ("vital")
+                ? juce::File::getCurrentWorkingDirectory().getChildFile (juce::String (o.get ("vital")))
+                : VitalHost::findInstalled();
             if (path == juce::File() || ! path.exists())
             {
                 std::cerr << "Vital.vst3 was not found. Install Vital, or pass --vital=<path to Vital.vst3>.\n";
@@ -315,6 +318,8 @@ be rolled again on the next.
                 std::cerr << "Vital would not load: " << error << "\n";
                 return false;
             }
+            // So the plugin and the next run find it without being told.
+            VitalHost::rememberLocation (path);
             auto init = vital.currentPreset();
             if (init.is_null() || ! init.contains ("settings"))
             {

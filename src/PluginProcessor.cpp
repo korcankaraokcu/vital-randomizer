@@ -63,14 +63,26 @@ void VitalRandomizerProcessor::loadVitalNow()
         return;
     }
 
+    /*  At the rate the DAW is running, once it has said. The host usually
+        prepares the plugin before this runs, while there is no Vital yet to
+        pass that on to, so a Vital always started at 44.1 kHz stayed there and
+        played sharp in a 48 kHz project.
+    */
+    const auto rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    const auto block = getBlockSize() > 0 ? getBlockSize() : 512;
+
     juce::String error;
-    if (! host.load (vitalPath, 44100.0, 512, error))
+    if (! host.load (vitalPath, rate, block, error))
     {
         errorText = error;
         setStatus ("Could not load Vital", -1.0f, false);
         sendChangeMessage();
         return;
     }
+
+    // Kept for every project from now on, not only this one.
+    VitalHost::rememberLocation (vitalPath);
+    errorText.clear();
 
     // The offline one is optional. Without it rolls still work, they just stop
     // being screened and level matched.
@@ -184,6 +196,9 @@ void VitalRandomizerProcessor::run()
         wakeUp.wait (250);
         if (threadShouldExit() || quitting.load())
             break;
+
+        // Held for the whole job, so Vital is never swapped out from under it.
+        const juce::ScopedLock working (workLock);
 
         Job job = Job::none;
         {
@@ -810,13 +825,62 @@ void VitalRandomizerProcessor::setHistoryLimit (size_t limit)
     candidateStore.setHistoryLimit (limit);
 }
 
-void VitalRandomizerProcessor::locateVital (const juce::File& vst3)
+juce::File VitalRandomizerProcessor::vitalLocation() const
+{
+    if (host.isLoaded() && host.loadedFrom() != juce::File())
+        return host.loadedFrom();
+    const auto remembered = VitalHost::rememberedLocation();
+    if (remembered != juce::File())
+        return remembered;
+    return VitalHost::findInstalled();
+}
+
+void VitalRandomizerProcessor::locateVital (const juce::File& picked)
 {
     // Called from the editor, so already on the message thread, which is where
     // a VST3 instance has to be created.
-    vitalPath = vst3;
+    const auto vst3 = VitalHost::bundleFor (picked);
     errorText.clear();
+    if (! host.isLoaded())
+    {
+        vitalPath = vst3;
+        loadVitalNow();
+        return;
+    }
+    if (vst3 == host.loadedFrom())
+        return;
+
+    /*  Switch to the Vital chosen, even with one already playing.
+
+        This used to only note the new path while carrying on with the Vital
+        already loaded, so the project saved a location that was never used
+        and the choice was not remembered for the next project. The patch
+        playing comes across, and if the chosen file will not load the old
+        Vital is put back.
+    */
+    const juce::ScopedLock working (workLock);
+    const auto playing = host.currentPreset();
+    const auto previous = host.loadedFrom();
+
+    vitalReady = false;
+    dropPrefetch();
+    host.unload();
+    preview.unload();
+
+    vitalPath = vst3;
     loadVitalNow();
+    if (! host.isLoaded())
+    {
+        const auto why = errorText;
+        vitalPath = previous;
+        loadVitalNow();
+        errorText = "That Vital would not load, so the previous one is back. " + why;
+        setStatus ("Kept the previous Vital", -1.0f, false);
+        sendChangeMessage();
+    }
+
+    if (host.isLoaded() && ! playing.is_null() && playing.contains ("settings"))
+        host.applyPreset (playing);
 }
 
 void VitalRandomizerProcessor::setStatus (const juce::String& message, float progress,
@@ -929,11 +993,24 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
 
     varyDepth = j.value ("vary", 0.25f);
 
-    if (j.contains ("vital"))
+    /*  The Vital the project was made with, if this instance has not found
+        one. The first load is queued when the plugin is created and can run
+        before the host hands this over, in which case it has already given up
+        without knowing this path, so it is tried again here.
+    */
+    if (j.contains ("vital") && ! host.isLoaded())
     {
         const juce::File v (juce::String (j["vital"].get<std::string>()));
         if (v.exists())
+        {
             vitalPath = v;
+            juce::WeakReference<VitalRandomizerProcessor> self (this);
+            juce::MessageManager::callAsync ([self]
+            {
+                if (auto* p = self.get())
+                    p->loadVitalNow();
+            });
+        }
     }
 
     if (j.contains ("candidates"))

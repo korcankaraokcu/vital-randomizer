@@ -106,6 +106,8 @@ public:
 
     /** Point the randomizer at a different Vital binary. */
     void locateVital (const juce::File& vst3);
+    /** The Vital in use, or failing that the one that would be tried. */
+    juce::File vitalLocation() const;
 
     Status status() const;
     std::vector<std::string> availableStyles() const;
@@ -165,6 +167,9 @@ private:
 
     juce::WaitableEvent wakeUp;
     std::atomic<bool> quitting { false };
+    // Held by the worker through each job and by a switch to another Vital,
+    // which replaces the instances and the generator a job is using.
+    juce::CriticalSection workLock;
     juce::CriticalSection jobLock;
     Job pendingJob = Job::none;
     size_t pendingKeeper = 0;

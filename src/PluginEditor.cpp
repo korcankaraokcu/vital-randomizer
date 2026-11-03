@@ -644,16 +644,46 @@ void VitalRandomizerEditor::showSettingsMenu()
     {
         if (result == 1)
         {
+            /*  Opened on the Vital in use, or the one last used. Given nothing,
+                Windows opens wherever this process last browsed, which in a
+                DAW is often another plugin's folder. A location that has gone
+                opens on the nearest folder still there.
+            */
+            auto start = proc.vitalLocation();
+            while (start != juce::File() && ! start.exists() && start.getParentDirectory() != start)
+                start = start.getParentDirectory();
+            // A bundle folder would open the dialog inside it.
+            if (start.isDirectory() && start.getFileName().endsWithIgnoreCase (".vst3"))
+                start = start.getParentDirectory();
+
+            /*  One kind of item, so each system shows its own dialog. Asking
+                for files and folders together is something the Windows dialog
+                cannot do, and JUCE fell back to its own bare browser for it.
+                On Linux a VST3 is always a folder. On Windows and macOS it is
+                picked as a file, a bundle's inner binary included, which
+                locateVital takes back up to the bundle.
+            */
+           #if JUCE_LINUX || JUCE_BSD
+            const auto pick = juce::FileBrowserComponent::canSelectDirectories;
+           #else
+            const auto pick = juce::FileBrowserComponent::canSelectFiles;
+           #endif
             chooser = std::make_unique<juce::FileChooser> ("Where is Vital.vst3?",
-                                                           juce::File(), "*.vst3");
-            chooser->launchAsync (juce::FileBrowserComponent::openMode
-                                      | juce::FileBrowserComponent::canSelectFiles
-                                      | juce::FileBrowserComponent::canSelectDirectories,
+                                                           start, "*.vst3");
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | pick,
                                   [this] (const juce::FileChooser& fc)
             {
                 const auto file = fc.getResult();
                 if (file != juce::File())
+                {
+                    // Vital's editor belongs to the instance being replaced,
+                    // so it goes first and is opened again on the new one.
+                    vitalEditor.reset();
+                    triedAttaching = false;
                     proc.locateVital (file);
+                    attachVitalEditor();
+                    repaint();
+                }
             });
         }
     });

@@ -27,11 +27,24 @@ public:
 
     /** Standard install locations, in the order they are tried. */
     static juce::Array<juce::File> searchPaths();
+    /** Vital wherever it was last loaded from, then the standard places. */
     static juce::File findInstalled();
+
+    /*  Where Vital was last loaded from, kept for every project and for
+        vrgen, in the user's application data. */
+    static juce::File rememberedLocation();
+    static void rememberLocation (const juce::File& vst3);
+
+    /** The VST3 a picked file belongs to: the bundle folder when the file is
+        the binary inside one, otherwise the file itself. */
+    static juce::File bundleFor (const juce::File& picked);
 
     bool load (const juce::File& vst3, double sampleRate, int blockSize,
                juce::String& error);
     bool isLoaded() const { return instance != nullptr; }
+    /** Let go of the instance, so a different Vital can be loaded. Any editor
+        made from it has to be gone first. */
+    void unload();
     juce::File loadedFrom() const { return pluginFile; }
 
     void prepare (double sampleRate, int blockSize);
