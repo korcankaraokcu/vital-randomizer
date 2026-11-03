@@ -1,0 +1,151 @@
+# Builds the plugin and vrgen for Windows and Linux.
+#
+# Pushing a version tag (1.2.2, matching the VERSION in CMakeLists.txt) builds
+# both and attaches them to a draft release for that tag, which stays a draft
+# until it is published by hand with its notes written. Running it from the
+# Actions tab builds both without touching any release, to check a build before
+# tagging it.
+
+name: Release
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+env:
+  JUCE_VERSION: 8.0.4
+  JSON_VERSION: v3.11.3
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(sed -n 's/^project(VitalRandomizer VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $version in CMakeLists.txt"
+            exit 1
+          fi
+
+      - name: Fetch dependencies
+        run: |
+          git clone -q --depth 1 --branch "$JUCE_VERSION" https://github.com/juce-framework/JUCE deps/JUCE
+          curl -sSL --create-dirs -o deps/nlohmann/json.hpp \
+            "https://raw.githubusercontent.com/nlohmann/json/$JSON_VERSION/single_include/nlohmann/json.hpp"
+
+      - name: Build
+        run: |
+          cmake -S . -B build -A x64
+          cmake --build build --config Release --parallel --target VitalRandomizer_VST3 vrgen
+
+      - name: Package
+        run: |
+          mkdir dist
+          ./build/vrgen_artefacts/Release/vrgen.exe --version
+          (cd build/VitalRandomizer_artefacts/Release/VST3 &&
+            cmake -E tar cf "$GITHUB_WORKSPACE/dist/Vital.Randomizer.vst3.zip" --format=zip "Vital Randomizer.vst3")
+          cp build/vrgen_artefacts/Release/vrgen.exe dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    # Built on the oldest Ubuntu still in wide use rather than the runner's
+    # own, because a Linux binary only loads on a glibc at least as new as the
+    # one it was built against. 22.04 has glibc 2.35, which covers Debian 12,
+    # Mint 21 and everything newer.
+    container: ubuntu:22.04
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            build-essential cmake git curl ca-certificates pkg-config binutils \
+            libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libfreetype-dev libfontconfig1-dev libgl-dev
+
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(sed -n 's/^project(VitalRandomizer VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $version in CMakeLists.txt"
+            exit 1
+          fi
+
+      - name: Fetch dependencies
+        run: |
+          git clone -q --depth 1 --branch "$JUCE_VERSION" https://github.com/juce-framework/JUCE deps/JUCE
+          curl -sSL --create-dirs -o deps/nlohmann/json.hpp \
+            "https://raw.githubusercontent.com/nlohmann/json/$JSON_VERSION/single_include/nlohmann/json.hpp"
+
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel "$(nproc)" --target VitalRandomizer_VST3 vrgen
+
+      - name: Check what the binaries need
+        run: |
+          plugin="build/VitalRandomizer_artefacts/Release/VST3/Vital Randomizer.vst3/Contents/x86_64-linux/Vital Randomizer.so"
+          for f in "$plugin" build/vrgen_artefacts/Release/vrgen; do
+            glibc=$(objdump -T "$f" | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)
+            echo "$(basename "$f") needs $glibc"
+            if objdump -p "$f" | grep -q 'NEEDED.*libstdc++'; then
+              echo "$(basename "$f") links libstdc++ dynamically, it should be built in"
+              exit 1
+            fi
+          done
+          build/vrgen_artefacts/Release/vrgen --version
+
+      - name: Package
+        run: |
+          mkdir dist
+          (cd build/VitalRandomizer_artefacts/Release/VST3 &&
+            cmake -E tar cf "$GITHUB_WORKSPACE/dist/Vital.Randomizer.vst3-linux.zip" --format=zip "Vital Randomizer.vst3")
+          # A tarball rather than the bare file, so it downloads still executable.
+          (cd build/vrgen_artefacts/Release &&
+            cmake -E tar czf "$GITHUB_WORKSPACE/dist/vrgen-linux.tar.gz" vrgen)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          # A release made by hand for the tag first is kept, notes and all,
+          # and only has the files added or replaced.
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes ""
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber

@@ -26,8 +26,9 @@ starting points, so what it makes is yours.
 ## Install
 
 Download the latest zip for your system from the
-[releases page](../../releases) and extract it. Inside is a folder named
-`Vital Randomizer.vst3`. Move that whole folder, as it is, into your VST3
+[releases page](../../releases), `Vital.Randomizer.vst3.zip` for Windows or
+`Vital.Randomizer.vst3-linux.zip` for Linux, and extract it. Inside is a folder
+named `Vital Randomizer.vst3`. Move that whole folder, as it is, into your VST3
 folder, then rescan plugins in your DAW.
 
 On Windows:
@@ -50,8 +51,8 @@ On Linux:
   Use Vital's VST3, not its LV2. The LV2 freezes Reaper when it is added to a
   track, and the randomizer hosts the VST3 anyway.
 
-The CLI is a single file, `vrgen.exe` on Windows and `vrgen` on Linux. Put it
-anywhere and run it from a terminal.
+The CLI is a single file, `vrgen.exe` on Windows and `vrgen` on Linux, which
+comes in `vrgen-linux.tar.gz`. Put it anywhere and run it from a terminal.
 
 ## Using it
 
@@ -136,9 +137,14 @@ cmake --build build -j --target VitalRandomizer_VST3 vrgen
 cmake --build build --target install_user_vst3
 ```
 
-`install_user_vst3` copies the plugin to `~/.vst3`. A Linux release build needs
-the glibc of the machine it was built on, so build releases on the oldest
-distro you want to support, Ubuntu 22.04 for example, rather than the newest.
+`install_user_vst3` copies the plugin to `~/.vst3`. A Linux build only loads on
+a glibc at least as new as the one it was built against, so a build made on a
+new distro will not run on an older one.
+
+Releases are built by GitHub Actions. Pushing a tag that matches the version in
+`CMakeLists.txt` builds Windows, and Linux on Ubuntu 22.04, then attaches both
+to a draft release for that tag. Running the workflow from the Actions tab
+builds both without making a release.
 
 `vrtest` generates a batch and scores it by rendering through real Vital,
 `vrscan` loads a VST3 the way a DAW does, and `tools/measure.py` checks the
