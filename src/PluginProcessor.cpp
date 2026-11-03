@@ -97,6 +97,11 @@ void VitalRandomizerProcessor::loadVitalNow()
     setStatus (generator->isReady() ? "Ready" : "Could not read Vital's init patch",
                -1.0f, false);
     sendChangeMessage();
+
+    vitalReady = true;
+    // A project handed its state over before Vital was ready.
+    if (restorePending)
+        enqueue (Job::restore);
 }
 
 // ---------------------------------------------------------------- audio ----
@@ -193,6 +198,7 @@ void VitalRandomizerProcessor::run()
             case Job::vary:
             case Job::recall:
             case Job::reloadCurrent:   performRoll (job); break;
+            case Job::restore:         restoreSavedPatch(); break;
             case Job::prefetch:
             {
                 /*  Built with the settings as they stand now. If they move
@@ -334,6 +340,40 @@ void VitalRandomizerProcessor::performRoll (Job job)
             pendingJob = Job::prefetch;
         wakeUp.signal();
     }
+}
+
+void VitalRandomizerProcessor::restoreSavedPatch()
+{
+    if (! vitalReady || ! restorePending.exchange (false))
+        return;
+
+    /*  The project kept the patch, the history and the sliders, but only the
+        patch has to be handed to Vital. Without this Vital opened on its init
+        patch while everything around it came back, and the saved sound only
+        returned once a history slot was clicked.
+    */
+    nlohmann::json saved;
+    {
+        const juce::ScopedLock sl (livePresetLock);
+        saved = livePreset;
+    }
+    if (saved.is_null() || ! saved.contains ("settings"))
+        return;
+
+    setStatus ("Restoring", -1.0f, true);
+    sendChangeMessage();
+
+    if (host.applyPreset (saved))
+    {
+        errorText.clear();
+        setStatus ("Restored", -1.0f, false);
+    }
+    else
+    {
+        errorText = "Vital rejected the patch saved with this project";
+        setStatus ("Load failed", -1.0f, false);
+    }
+    sendChangeMessage();
 }
 
 gen::Result VitalRandomizerProcessor::rollScreened (Job job,
@@ -839,9 +879,19 @@ void VitalRandomizerProcessor::getStateInformation (juce::MemoryBlock& destData)
 
     j["candidates"] = candidateStore.toJson();
 
-    // The patch itself rides along, so reopening the project restores exactly
-    // what was playing rather than a fresh roll.
-    auto live = host.currentPreset();
+    /*  The patch itself rides along, so reopening the project restores exactly
+        what was playing rather than a fresh roll. Until a restored patch has
+        reached Vital, Vital is still on its init patch, and an undo point or
+        an autosave taken then would have saved init over it.
+    */
+    nlohmann::json live;
+    if (vitalReady && ! restorePending)
+        live = host.currentPreset();
+    if (live.is_null() || ! live.contains ("settings"))
+    {
+        const juce::ScopedLock sl (livePresetLock);
+        live = livePreset;
+    }
     if (! live.is_null())
         j["preset"] = std::move (live);
 
@@ -896,7 +946,11 @@ void VitalRandomizerProcessor::setStateInformation (const void* data, int sizeIn
         // Saved from Vital as it was playing, so it may carry hand edits that
         // no recipe reproduces.
         liveRecipe = nullptr;
+        restorePending = true;
     }
+    dropPrefetch();
+    if (restorePending && vitalReady)
+        enqueue (Job::restore);
 }
 
 juce::AudioProcessorEditor* VitalRandomizerProcessor::createEditor()

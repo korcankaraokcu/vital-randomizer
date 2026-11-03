@@ -24,7 +24,7 @@ class VitalRandomizerProcessor : public juce::AudioProcessor,
                                  private juce::Thread
 {
 public:
-    enum class Job { none, rollNew, vary, recall, reloadCurrent, prefetch };
+    enum class Job { none, rollNew, vary, recall, reloadCurrent, prefetch, restore };
 
     struct Status
     {
@@ -124,6 +124,8 @@ private:
     void run() override;
     void enqueue (Job job);
     void performRoll (Job job);
+    /** Load the patch a project was saved with into Vital. */
+    void restoreSavedPatch();
     /** Generate and screen until something passes. The slow half of a roll,
         and the half that can be done before the user asks for it. */
     gen::Result rollScreened (Job job, const std::shared_ptr<const nlohmann::json>& locked);
@@ -209,6 +211,13 @@ private:
     std::shared_ptr<const store::Recipe> liveRecipe;
     juce::CriticalSection livePresetLock;
     std::shared_ptr<const nlohmann::json> lastLocked;
+    /*  A project's patch waiting to go into Vital. The host can hand the
+        state over before Vital has finished loading or after, so whichever
+        of the two comes second starts the restore. */
+    std::atomic<bool> restorePending { false };
+    // Set once loading Vital has finished, warm-up included, since the
+    // warm-up puts Vital back on its init patch.
+    std::atomic<bool> vitalReady { false };
     juce::String auditionSummary;
 
     void loadVitalNow();
