@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
-project(VitalRandomizer VERSION 1.2.1 LANGUAGES CXX)
+# C as well as C++, because JUCE compiles some of its Linux sources as C.
+project(VitalRandomizer VERSION 1.2.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +9,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # that does not have the Visual C++ Redistributable installed. It adds about
 # half a megabyte to each.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# The same on Linux, where a distro older than the build machine has an older
+# libstdc++ and would refuse to load the plugin. The copy built in is kept out
+# of the exported symbols, so it cannot clash with the host's own.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_link_options(-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL)
+endif()
 
 add_subdirectory(deps/JUCE)
 

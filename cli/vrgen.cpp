@@ -277,11 +277,48 @@ be rolled again on the next.
         return out;
     }
 
+    /*  Where Vital keeps its presets, found the way Vital finds it.
+
+        A data folder moved in Vital's settings is recorded in its config file,
+        and wins wherever it points. Otherwise it is Documents/Vital everywhere
+        but Linux, where Vital keeps it under the XDG data folder instead, so a
+        batch written to Documents there never showed up in its browser.
+    */
+    juce::File vitalDataDirectory()
+    {
+       #if JUCE_LINUX || JUCE_BSD
+        const auto config = juce::File ("~/.vital/Vital.config");
+       #elif JUCE_MAC
+        const auto config = juce::File ("~/Library/Application Support/vital/Vital.config");
+       #else
+        const auto config = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                .getChildFile ("vital").getChildFile ("Vital.config");
+       #endif
+        if (config.existsAsFile())
+        {
+            const auto j = nlohmann::json::parse (config.loadFileAsString().toStdString(), nullptr, false);
+            if (j.is_object() && j.contains ("data_directory") && j["data_directory"].is_string())
+            {
+                const juce::File moved (juce::String (j["data_directory"].get<std::string>()));
+                if (moved.isDirectory())
+                    return moved;
+            }
+        }
+
+       #if JUCE_LINUX || JUCE_BSD
+        const auto xdg = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_HOME", {}).trim();
+        if (xdg.isNotEmpty())
+            return juce::File (xdg).getChildFile ("vital");
+        return juce::File ("~/.local/share/vital");
+       #else
+        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Vital");
+       #endif
+    }
+
     juce::File outputFolder (const Options& o, const juce::String& batchName)
     {
         if (o.has ("into-vital"))
-            return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                .getChildFile ("Vital").getChildFile ("User").getChildFile ("Presets").getChildFile (batchName);
+            return vitalDataDirectory().getChildFile ("User").getChildFile ("Presets").getChildFile (batchName);
         if (o.has ("out") && ! o.get ("out").empty())
             return juce::File::getCurrentWorkingDirectory().getChildFile (juce::String (o.get ("out")));
         return juce::File::getCurrentWorkingDirectory().getChildFile ("vrgen presets");

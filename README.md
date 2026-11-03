@@ -25,19 +25,33 @@ starting points, so what it makes is yours.
 
 ## Install
 
-Download the latest zip from the [releases page](../../releases) and extract
-it. Inside is a folder named `Vital Randomizer.vst3`. Move that whole folder,
-as it is, into your VST3 folder:
+Download the latest zip for your system from the
+[releases page](../../releases) and extract it. Inside is a folder named
+`Vital Randomizer.vst3`. Move that whole folder, as it is, into your VST3
+folder, then rescan plugins in your DAW.
+
+On Windows:
 
 - `C:\Program Files\Common Files\VST3` is the standard location every DAW
   scans. Windows asks for admin permission to copy there.
 - `%LOCALAPPDATA%\Programs\Common\VST3` needs no admin permission. If your DAW
   does not find the plugin there, use the first location instead.
 
-Then rescan plugins in your DAW. Releases are for Windows.
+On Linux:
 
-The CLI is a single file, `vrgen.exe`. Put it anywhere and run it from a
-terminal.
+- `~/.vst3` needs no admin permission and is the place to start.
+- `/usr/lib/vst3` is the system-wide location, which needs `sudo` to copy to.
+
+  Your DAW has to scan the folder you pick. Reaper on Linux only scans
+  `~/.vst` and `~/.vst3` out of the box, so add `/usr/lib/vst3` under
+  Options > Preferences > Plug-ins > VST if you install there. This goes for
+  Vital too: the Vital `.deb` installs to `/usr/lib/vst3`.
+
+  Use Vital's VST3, not its LV2. The LV2 freezes Reaper when it is added to a
+  track, and the randomizer hosts the VST3 anyway.
+
+The CLI is a single file, `vrgen.exe` on Windows and `vrgen` on Linux. Put it
+anywhere and run it from a terminal.
 
 ## Using it
 
@@ -62,7 +76,7 @@ Everything saves with the DAW project.
 
 ## CLI (vrgen)
 
-`vrgen.exe` makes presets in batches. It uses the same generator and checks as
+`vrgen` makes presets in batches. It uses the same generator and checks as
 the plugin, so every preset is rendered through Vital and levelled to -16 LUFS.
 Vital needs to be installed.
 
@@ -85,6 +99,9 @@ A slider takes a value, a range drawn per preset, or `ramp`, and each style's
 own setting when left out. Files go to `vrgen presets` in the current folder
 unless `--out=<folder>` or `--into-vital` says otherwise, named by
 `--name="{style}_{n}"` with `{kind}`, `{scale}` and `{seed}` also available.
+`--into-vital` writes to the presets folder Vital itself uses: a data folder
+moved in Vital's settings if there is one, otherwise `Documents\Vital` on
+Windows and `~/.local/share/vital` on Linux.
 
 Every batch prints its seed when it starts. Run the same command with
 `--seed=<that number>` to get the same batch again. This works nearly always,
@@ -106,6 +123,22 @@ cmake --build build --config Release --target VitalRandomizer_VST3
 cmake --build build --config Release --target install_user_vst3
 cmake --build build --config Release --target vrgen
 ```
+
+On Linux, install JUCE's dependencies first (these are the Debian and Ubuntu
+names), and leave out `-A x64`, which only the Visual Studio generator takes:
+
+```
+sudo apt install build-essential cmake libasound2-dev libx11-dev libxrandr-dev \
+  libxinerama-dev libxcursor-dev libxext-dev libfreetype-dev libfontconfig1-dev libgl-dev
+
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j --target VitalRandomizer_VST3 vrgen
+cmake --build build --target install_user_vst3
+```
+
+`install_user_vst3` copies the plugin to `~/.vst3`. A Linux release build needs
+the glibc of the machine it was built on, so build releases on the oldest
+distro you want to support, Ubuntu 22.04 for example, rather than the newest.
 
 `vrtest` generates a batch and scores it by rendering through real Vital,
 `vrscan` loads a VST3 the way a DAW does, and `tools/measure.py` checks the

@@ -37,6 +37,8 @@ def open_vital(path=None):
         r"C:/Program Files/Common Files/VST3/Vital.vst3",
         os.path.expanduser("~/Library/Audio/Plug-Ins/VST3/Vital.vst3"),
         "/usr/lib/vst3/Vital.vst3",
+        "/usr/local/lib/vst3/Vital.vst3",
+        os.path.expanduser("~/.vst3/Vital.vst3"),
     ]:
         if candidate and os.path.exists(candidate):
             plugin = load_plugin(candidate)
