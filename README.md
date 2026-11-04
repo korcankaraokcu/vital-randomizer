@@ -26,9 +26,9 @@ starting points, so what it makes is yours.
 ## Install
 
 Download the latest zip for your system from the
-[releases page](../../releases), `Vital.Randomizer.vst3.zip` for Windows or
-`Vital.Randomizer.vst3-linux.zip` for Linux, and extract it. Inside is a folder
-named `Vital Randomizer.vst3`. Move that whole folder, as it is, into your VST3
+[releases page](../../releases), `Vital.Randomizer.vst3-windows.zip` for
+Windows or `Vital.Randomizer.vst3-linux.zip` for Linux, and extract it. Inside
+is a folder named `Vital Randomizer.vst3`. Move that whole folder, as it is, into your VST3
 folder, then rescan plugins in your DAW.
 
 On Windows:

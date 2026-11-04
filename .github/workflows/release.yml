@@ -50,7 +50,7 @@ jobs:
           mkdir dist
           ./build/vrgen_artefacts/Release/vrgen.exe --version
           (cd build/VitalRandomizer_artefacts/Release/VST3 &&
-            cmake -E tar cf "$GITHUB_WORKSPACE/dist/Vital.Randomizer.vst3.zip" --format=zip "Vital Randomizer.vst3")
+            cmake -E tar cf "$GITHUB_WORKSPACE/dist/Vital.Randomizer.vst3-windows.zip" --format=zip "Vital Randomizer.vst3")
           cp build/vrgen_artefacts/Release/vrgen.exe dist/
 
       - uses: actions/upload-artifact@v7
