@@ -1,10 +1,9 @@
 # Builds the plugin and vrgen for Windows and Linux.
 #
 # Pushing a version tag (1.2.2, matching the VERSION in CMakeLists.txt) builds
-# both and attaches them to a draft release for that tag, which stays a draft
-# until it is published by hand with its notes written. Running it from the
-# Actions tab builds both without touching any release, to check a build before
-# tagging it.
+# both and publishes a release for that tag with the files attached. Running it
+# from the Actions tab builds both without touching any release, to check a
+# build before tagging it.
 
 name: Release
 
@@ -24,7 +23,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag matches the version
         if: github.ref_type == 'tag'
@@ -54,7 +53,7 @@ jobs:
             cmake -E tar cf "$GITHUB_WORKSPACE/dist/Vital.Randomizer.vst3.zip" --format=zip "Vital Randomizer.vst3")
           cp build/vrgen_artefacts/Release/vrgen.exe dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/
@@ -76,7 +75,7 @@ jobs:
             libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
             libxext-dev libfreetype-dev libfontconfig1-dev libgl-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag matches the version
         if: github.ref_type == 'tag'
@@ -120,7 +119,7 @@ jobs:
           (cd build/vrgen_artefacts/Release &&
             cmake -E tar czf "$GITHUB_WORKSPACE/dist/vrgen-linux.tar.gz" vrgen)
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/
@@ -133,19 +132,28 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
-      - name: Attach to a draft release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          NOTES: >-
+            A local installation of Vital is required, tested with Vital 1.0.7.
+            Installation instructions of Vital Randomizer can be found in README.
         run: |
           ls -l dist
-          # A release made by hand for the tag first is kept, notes and all,
-          # and only has the files added or replaced.
-          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes ""
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          # A release made by hand for the tag first is kept as it is, notes
+          # and draft state included, and only has the files added or replaced.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            # Made as a draft and published once the files are on it, so the
+            # release is never public without its downloads.
+            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes "$NOTES"
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi

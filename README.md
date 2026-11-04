@@ -142,8 +142,8 @@ a glibc at least as new as the one it was built against, so a build made on a
 new distro will not run on an older one.
 
 Releases are built by GitHub Actions. Pushing a tag that matches the version in
-`CMakeLists.txt` builds Windows, and Linux on Ubuntu 22.04, then attaches both
-to a draft release for that tag. Running the workflow from the Actions tab
+`CMakeLists.txt` builds Windows, and Linux on Ubuntu 22.04, then publishes a
+release for that tag with both attached. Running the workflow from the Actions tab
 builds both without making a release.
 
 `vrtest` generates a batch and scores it by rendering through real Vital,
